@@ -32,7 +32,7 @@ from .src.api_proxy import create_proxy_router
     "generic_fallback",
     "sch-chun",
     "通用回退代理插件（基于 Provider 回退链）",
-    "0.0.1",
+    "0.0.2",
     "https://github.com/sch-chun/astrbot_plugin_generic_fallback"
 )
 class GenericFallbackProxyPlugin(Star):

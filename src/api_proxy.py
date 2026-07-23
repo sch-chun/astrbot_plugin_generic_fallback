@@ -136,7 +136,13 @@ def create_proxy_router(
             if not is_stream:
                 resp = await client.post(url, headers=headers, json=body_for_request, timeout=timeout)
                 if resp.status_code != 200:
-                    logger.warning(f"Provider {provider_id} 请求失败，HTTP {resp.status_code}，标记冷却并回退")
+
+                    # 读取完整响应内容
+                    try:
+                        error_text = resp.text
+                    except Exception:
+                        error_text = resp.content.decode("utf-8", errors="ignore")
+                    logger.warning(f"Provider {provider_id} 请求失败，HTTP {resp.status_code}，标记冷却并回退：{error_text}")
                     await model_manager.mark_cooldown(provider_id, f"HTTP {resp.status_code}")
                     return None
                 
@@ -169,8 +175,9 @@ def create_proxy_router(
 
                 if resp.status_code != 200:
                     error_body = await resp.aread()
+                    error_text = error_body.decode("utf-8", errors="ignore")
                     await req.__aexit__(None, None, None)
-                    logger.warning(f"Provider {provider_id} 流式请求失败，HTTP {resp.status_code}，标记冷却并回退")
+                    logger.warning(f"Provider {provider_id} 流式请求失败，HTTP {resp.status_code}，标记冷却并回退：{error_text}")
                     await model_manager.mark_cooldown(provider_id, f"HTTP {resp.status_code}")
                     return None
 
