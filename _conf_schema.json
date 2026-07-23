@@ -1,0 +1,68 @@
+{
+  "proxy_port": {
+    "description": "代理服务监听端口",
+    "type": "int",
+    "default": 3474
+  },
+  "proxy_host": {
+    "description": "代理服务监听地址",
+    "type": "string",
+    "default": "127.0.0.1",
+    "hint": "建议保持 127.0.0.1（仅本机），若需外部访问改为 0.0.0.0"
+  },
+  "proxy_api_key": {
+    "description": "代理服务自身 API Key（可选，留空则不验证）",
+    "type": "string",
+    "default": "",
+    "hint": "设置后客户端需在 Authorization 头携带此 Key"
+  },
+  "show_model_tag": {
+    "description": "在回复文本前插入 [Provider名称] 标识",
+    "type": "bool",
+    "default": false
+  },
+  "log_response": {
+    "description": "将上游响应内容打印到日志（调试用）",
+    "type": "bool",
+    "default": false
+  },
+  "virtual_models": {
+    "description": "虚拟模型配置列表，每个虚拟模型对应一组 Provider 回退链",
+    "type": "template_list",
+    "templates": {
+      "default": {
+        "name": "回退虚拟模型",
+        "hint": "配置一个对外暴露的模型名称及其 Provider 回退列表",
+        "display_item": "name",
+        "items": {
+          "name": {
+            "description": "虚拟模型名称（客户端请求时使用）",
+            "type": "string",
+            "default": "fallback-model"
+          },
+          "provider_ids": {
+            "description": "选择作为回退链的 Provider（按优先级顺序）",
+            "type": "list",
+            "_special": "select_providers",
+            "default": [],
+            "hint": "至少选择一个 Provider"
+          },
+          "timeout": {
+            "description": "请求超时时间（秒）",
+            "type": "int",
+            "default": 120,
+            "hint": "根据模型响应速度适当调整"
+          }
+        }
+      }
+    },
+    "default": [
+      {
+        "__template_key": "default",
+        "name": "my-fallback",
+        "provider_ids": [],
+        "timeout": 120
+      }
+    ]
+  }
+}
