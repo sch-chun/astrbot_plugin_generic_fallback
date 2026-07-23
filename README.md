@@ -14,7 +14,7 @@
 
 ## 安装
 
-在 AstrBot 管理面板的插件市场中搜索 `generic_fallback` 安装，或手动克隆到插件目录：
+在 AstrBot 管理面板通过链接（https://github.com/sch-chun/astrbot_plugin_generic_fallback）安装，或手动克隆到插件目录：
 
 ```bash
 cd AstrBot/data/plugins
@@ -75,10 +75,6 @@ curl http://127.0.0.1:3474/v1/status
 ## 监控
 
 插件内置监控面板，可在 AstrBot 管理面板的插件页面查看，显示各 Provider 的冷却状态和虚拟模型配置信息。
-
-## 版本
-
-v0.0.1 - 初版，基础回退代理功能
 
 ## 许可
 
