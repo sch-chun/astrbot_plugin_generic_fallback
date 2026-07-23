@@ -3,4 +3,4 @@ display_name: Generic Fallback
 desc: 通用回退插件，可配置多个模型回退列表整合成的虚拟模型，供本体及其他插件调用
 version: v0.0.2
 author: sch_chun
-repo: https://github.com/sch_chun/astrbot_plugin_generic_fallback
+repo: https://github.com/sch-chun/astrbot_plugin_generic_fallback
