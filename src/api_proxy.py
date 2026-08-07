@@ -210,6 +210,14 @@ def create_proxy_router(
                     tool_choice=tool_choice,
                     **extra_kwargs,
                 )
+
+                # 空响应检查
+                if not llm_resp.completion_text and not llm_resp.tools_call_args:
+                    error_msg = f"Provider {provider_id} 返回空响应"
+                    logger.warning(error_msg)
+                    await model_manager.mark_cooldown(provider_id, error_msg)
+                    return None
+                
                 openai_resp = _llm_response_to_openai_chat_completion(llm_resp, requested_model)
                 if log_resp:
                     logger.info(f"[响应日志] Provider={provider_id} 非流式响应: {json.dumps(openai_resp, ensure_ascii=False)[:500]}...")
