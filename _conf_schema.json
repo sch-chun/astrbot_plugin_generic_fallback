@@ -16,11 +16,6 @@
     "default": "",
     "hint": "设置后客户端需在 Authorization 头携带此 Key"
   },
-  "show_model_tag": {
-    "description": "在回复文本前插入 [Provider名称] 标识",
-    "type": "bool",
-    "default": false
-  },
   "log_response": {
     "description": "将上游响应内容打印到日志（调试用）",
     "type": "bool",
@@ -46,12 +41,6 @@
             "_special": "select_providers",
             "default": [],
             "hint": "至少选择一个 Provider"
-          },
-          "timeout": {
-            "description": "请求超时时间（秒）",
-            "type": "int",
-            "default": 120,
-            "hint": "根据模型响应速度适当调整"
           }
         }
       }
@@ -60,8 +49,7 @@
       {
         "__template_key": "default",
         "name": "my-fallback",
-        "provider_ids": [],
-        "timeout": 120
+        "provider_ids": []
       }
     ]
   }

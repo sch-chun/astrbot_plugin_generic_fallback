@@ -4,3 +4,4 @@ desc: 通用回退插件，可配置多个模型回退列表整合成的虚拟�
 version: v0.0.2
 author: sch_chun
 repo: https://github.com/sch-chun/astrbot_plugin_generic_fallback
+astrbot_version: ">=4.24.0"

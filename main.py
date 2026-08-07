@@ -117,7 +117,6 @@ class GenericFallbackProxyPlugin(Star):
             proxy_host=proxy_host,
             proxy_port=proxy_port,
             proxy_api_key=proxy_api_key,
-            show_model_tag=show_model_tag,
             log_response=log_response,
             virtual_models=self._virtual_models,
         )
@@ -140,7 +139,7 @@ class GenericFallbackProxyPlugin(Star):
         if not provider_manager:
             logger.warning("⚠️ ProviderManager 不可用，回退将无法工作（请检查 AstrBot 版本）")
 
-        proxy_router, self._close_http_client = create_proxy_router(
+        proxy_router = create_proxy_router(
             config=self._proxy_config,
             model_manager=self._model_manager,
             virtual_models=self._virtual_models,
