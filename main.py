@@ -1,4 +1,4 @@
-"""Generic Fallback Proxy — AstrBot 插件版 v0.0.1
+"""Generic Fallback Proxy — AstrBot 插件版 v0.0.2
 基于 Provider 回退的通用代理服务，支持用户从管理面板选择多个 Provider 作为回退链。
 """
 import asyncio
@@ -75,11 +75,9 @@ class GenericFallbackProxyPlugin(Star):
             if not provider_ids:
                 logger.warning(f"虚拟模型 '{name}' 的 provider_ids 为空，跳过")
                 continue
-            timeout = int(v.get("timeout", 120))
             self._virtual_models.append({
                 "name": name,
                 "provider_ids": provider_ids,
-                "timeout": timeout,
             })
 
         # 过滤循环引用
