@@ -1,29 +1,37 @@
 {
   "proxy_port": {
-    "description": "代理服务监听端口",
+    "description": "代理监听端口",
     "type": "int",
     "default": 3474
   },
   "proxy_host": {
-    "description": "代理服务监听地址",
+    "description": "代理监听地址",
     "type": "string",
     "default": "127.0.0.1",
     "hint": "建议保持 127.0.0.1（仅本机），若需外部访问改为 0.0.0.0"
   },
   "proxy_api_key": {
-    "description": "代理服务自身 API Key（可选，留空则不验证）",
+    "description": "代理自身 API Key",
     "type": "string",
     "default": "",
-    "hint": "设置后客户端需在 Authorization 头携带此 Key"
+    "hint": "可选，设置后客户端需在 Authorization 头携带此 Key"
+  },
+  "request_max_retries": {
+    "description": "最大尝试次数",
+    "type": "int",
+    "default": 1,
+    "hint": "每个 Provider 请求的最大尝试次数（含首次），设为 1 则不重试"
   },
   "log_response": {
-    "description": "将上游响应内容打印到日志（调试用）",
+    "description": "上游响应打印到日志",
     "type": "bool",
-    "default": false
+    "default": false,
+    "hint": "若开启，可能会打印大量日志，建议仅调试时开启"
   },
   "virtual_models": {
-    "description": "虚拟模型配置列表，每个虚拟模型对应一组 Provider 回退链",
+    "description": "虚拟模型配置列表",
     "type": "template_list",
+    "hint": "每个虚拟模型对应一组 Provider 回退链",
     "templates": {
       "default": {
         "name": "回退虚拟模型",
@@ -31,16 +39,17 @@
         "display_item": "name",
         "items": {
           "name": {
-            "description": "虚拟模型名称（客户端请求时使用）",
+            "description": "虚拟模型名称",
             "type": "string",
-            "default": "fallback-model"
+            "default": "fallback-model",
+            "hint": "客户端请求时使用"
           },
           "provider_ids": {
-            "description": "选择作为回退链的 Provider（按优先级顺序）",
+            "description": "回退链 Providers",
             "type": "list",
             "_special": "select_providers",
             "default": [],
-            "hint": "至少选择一个 Provider"
+            "hint": "按优先级顺序，至少选择一个 Provider"
           }
         }
       }

@@ -175,6 +175,7 @@ def create_proxy_router(
         is_stream: bool,
         log_resp: bool,
         requested_model: str,
+        request_max_retries: int
     ) -> Optional[Response]:
         if not provider_manager:
             logger.error("ProviderManager 未初始化")
@@ -208,6 +209,7 @@ def create_proxy_router(
                     system_prompt=system_prompt,
                     func_tool=func_tool,
                     tool_choice=tool_choice,
+                    request_max_retries=request_max_retries,
                     **extra_kwargs,
                 )
 
@@ -235,6 +237,7 @@ def create_proxy_router(
                         system_prompt=system_prompt,
                         func_tool=func_tool,
                         tool_choice=tool_choice,
+                        request_max_retries=request_max_retries,
                         **extra_kwargs,
                     ):
                         if llm_chunk.is_chunk:
@@ -364,6 +367,7 @@ def create_proxy_router(
             return JSONResponse(status_code=503, content={"error": {"message": "该虚拟模型未配置任何 Provider"}})
 
         is_stream = body.get("stream", False)
+        max_retries = config.request_max_retries
         log_resp = config.log_response
 
         for pid in provider_ids:
@@ -372,7 +376,7 @@ def create_proxy_router(
                 continue
 
             logger.info(f"尝试 Provider: {pid}")
-            resp = await _call_provider(pid, body, is_stream, log_resp, requested_model)
+            resp = await _call_provider(pid, body, is_stream, log_resp, requested_model, max_retries)
             if resp is not None:
                 return resp
 

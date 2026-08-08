@@ -1,4 +1,4 @@
-"""Generic Fallback Proxy — AstrBot 插件版 v0.0.2
+"""Generic Fallback Proxy — AstrBot 插件版
 基于 Provider 回退的通用代理服务，支持用户从管理面板选择多个 Provider 作为回退链。
 """
 import asyncio
@@ -14,7 +14,7 @@ from typing import Optional, Callable, Union
 from fastapi.responses import JSONResponse
 from quart.wrappers import Response
 
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star
 from astrbot.api import logger, AstrBotConfig
 
 # 兼容旧版 json_response
@@ -28,13 +28,6 @@ from .src.model_manager import ModelManager
 from .src.api_proxy import create_proxy_router
 
 
-@register(
-    "generic_fallback",
-    "sch-chun",
-    "通用回退代理插件（基于 Provider 回退链）",
-    "0.0.2",
-    "https://github.com/sch-chun/astrbot_plugin_generic_fallback"
-)
 class GenericFallbackProxyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
@@ -109,7 +102,9 @@ class GenericFallbackProxyPlugin(Star):
         proxy_port = int(self.config.get("proxy_port", 3474))
         proxy_host = self.config.get("proxy_host", "127.0.0.1")
         proxy_api_key = self.config.get("proxy_api_key", "")
-        show_model_tag = bool(self.config.get("show_model_tag", False))
+        request_max_retries = int(self.config.get("request_max_retries", 1))
+        if request_max_retries < 1:
+            request_max_retries = 1
         log_response = bool(self.config.get("log_response", False))
 
         # 3. 创建 ProxyConfig
@@ -119,6 +114,7 @@ class GenericFallbackProxyPlugin(Star):
             proxy_api_key=proxy_api_key,
             log_response=log_response,
             virtual_models=self._virtual_models,
+            request_max_retries=request_max_retries
         )
 
         # 4. 初始化模型管理器
