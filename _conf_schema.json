@@ -16,11 +16,11 @@
     "default": "",
     "hint": "可选，设置后客户端需在 Authorization 头携带此 Key"
   },
-  "request_max_retries": {
-    "description": "最大尝试次数",
+  "empty_response_max_attempts": {
+    "description": "空响应重试次数",
     "type": "int",
-    "default": 1,
-    "hint": "每个 Provider 请求的最大尝试次数（含首次），设为 1 则不重试"
+    "default": 3,
+    "hint": "若 Provider 返回空响应，则对这个 Provider 连续重试该次数，超过再尝试下一个 Provider。空响应检测暂时仅支持非流式"
   },
   "log_response": {
     "description": "上游响应打印到日志",

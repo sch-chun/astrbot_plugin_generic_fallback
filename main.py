@@ -102,9 +102,7 @@ class GenericFallbackProxyPlugin(Star):
         proxy_port = int(self.config.get("proxy_port", 3474))
         proxy_host = self.config.get("proxy_host", "127.0.0.1")
         proxy_api_key = self.config.get("proxy_api_key", "")
-        request_max_retries = int(self.config.get("request_max_retries", 1))
-        if request_max_retries < 1:
-            request_max_retries = 1
+        empty_response_max_attempts = int(self.config.get("empty_response_max_attempts", 3))
         log_response = bool(self.config.get("log_response", False))
 
         # 3. 创建 ProxyConfig
@@ -114,7 +112,7 @@ class GenericFallbackProxyPlugin(Star):
             proxy_api_key=proxy_api_key,
             log_response=log_response,
             virtual_models=self._virtual_models,
-            request_max_retries=request_max_retries
+            empty_response_max_attempts=empty_response_max_attempts
         )
 
         # 4. 初始化模型管理器

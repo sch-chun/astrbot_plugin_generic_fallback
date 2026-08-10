@@ -175,7 +175,7 @@ def create_proxy_router(
         is_stream: bool,
         log_resp: bool,
         requested_model: str,
-        request_max_retries: int
+        empty_response_max_attempts: int
     ) -> Optional[Response]:
         if not provider_manager:
             logger.error("ProviderManager 未初始化")
@@ -201,131 +201,150 @@ def create_proxy_router(
 
         func_tool = _build_toolset(tools) if tools else None
 
-        try:
-            if not is_stream:
-                llm_resp = await provider.text_chat(
-                    prompt=None,
-                    contexts=contexts,
-                    system_prompt=system_prompt,
-                    func_tool=func_tool,
-                    tool_choice=tool_choice,
-                    request_max_retries=request_max_retries,
-                    **extra_kwargs,
-                )
-
-                # 空响应检查
-                if not llm_resp.completion_text and not llm_resp.tools_call_args:
-                    error_msg = f"Provider {provider_id} 返回空响应"
-                    logger.warning(error_msg)
-                    await model_manager.mark_cooldown(provider_id, error_msg)
-                    return None
-                
-                openai_resp = _llm_response_to_openai_chat_completion(llm_resp, requested_model)
-                if log_resp:
-                    logger.info(f"[响应日志] Provider={provider_id} 非流式响应: {json.dumps(openai_resp, ensure_ascii=False)[:500]}...")
-                return JSONResponse(content=openai_resp, status_code=200)
-
-            else:
-                async def stream_generator() -> AsyncGenerator[bytes, None]:
-                    id = f"chatcmpl-{int(time.time())}"
-                    final_resp = None
-                    usage_sent = False
-
-                    async for llm_chunk in provider.text_chat_stream(
+        # 非流式
+        if not is_stream:
+            for attempt in range(1, empty_response_max_attempts + 1):
+                try:
+                    llm_resp = await provider.text_chat(
                         prompt=None,
                         contexts=contexts,
                         system_prompt=system_prompt,
                         func_tool=func_tool,
                         tool_choice=tool_choice,
-                        request_max_retries=request_max_retries,
+                        request_max_retries=1,
                         **extra_kwargs,
-                    ):
-                        if llm_chunk.is_chunk:
-                            
-                            # 增量 chunk —— 发送内容增量
-                            chunk_dict = await _llm_response_to_openai_stream(
-                                llm_chunk, requested_model, id, is_final=False
-                            )
-                            yield f"data: {json.dumps(chunk_dict, ensure_ascii=False)}\n\n".encode("utf-8")
-                        else:
+                    )
+                except Exception as e:
 
-                            # 最终响应 —— 只提取 usage，不发送内容
-                            final_resp = llm_chunk
+                    # 任何异常直接冷却并返回None（不重试）
+                    logger.warning(f"Provider {provider_id} 请求异常: {e}")
+                    await model_manager.mark_cooldown(provider_id, str(e))
+                    return None
 
-                            # 如果包含工具调用，需要以流式 chunk 形式发送
-                            if final_resp.tools_call_args:
+                # 检查空响应
+                if not llm_resp.completion_text and not llm_resp.tools_call_args:
+                    logger.warning(f"Provider {provider_id} 返回空响应 (尝试 {attempt}/{empty_response_max_attempts})")
+                    if attempt < empty_response_max_attempts:
+                        continue   # 重试
+                    else:
+                        await model_manager.mark_cooldown(provider_id, "空响应")
+                        return None
+                else:
+                    openai_resp = _llm_response_to_openai_chat_completion(llm_resp, requested_model)
+                    if log_resp:
+                        logger.info(f"[响应日志] Provider={provider_id} 非流式响应: {json.dumps(openai_resp, ensure_ascii=False)[:500]}...")
+                    return JSONResponse(content=openai_resp, status_code=200)
+        else:
 
-                                # 构建 tool_calls 列表
-                                tool_calls: list[dict] = []
-                                for i, args in enumerate(final_resp.tools_call_args):
-                                    tool_calls.append({
-                                        "id": final_resp.tools_call_ids[i] if i < len(final_resp.tools_call_ids) else f"call_{i}",
-                                        "type": "function",
-                                        "function": {
-                                            "name": final_resp.tools_call_name[i] if i < len(final_resp.tools_call_name) else "",
-                                            "arguments": json.dumps(args, ensure_ascii=False),
-                                        },
-                                    })
+            # 流式
+            try:
+                async def stream_generator() -> AsyncGenerator[bytes, None]:
+                    try:
+                        id = f"chatcmpl-{int(time.time())}"
+                        final_resp = None
+                        usage_sent = False
 
-                                # 发送 tool_calls chunk
-                                tool_chunk = {
-                                    "id": id,
-                                    "object": "chat.completion.chunk",
-                                    "created": int(time.time()),
-                                    "model": requested_model,
-                                    "choices": [
-                                        {
-                                            "index": 0,
-                                            "delta": {
-                                                "tool_calls": tool_calls
+                        async for llm_chunk in provider.text_chat_stream(
+                            prompt=None,
+                            contexts=contexts,
+                            system_prompt=system_prompt,
+                            func_tool=func_tool,
+                            tool_choice=tool_choice,
+                            request_max_retries=1,
+                            **extra_kwargs,
+                        ):
+                            if llm_chunk.is_chunk:
+                                
+                                # 增量 chunk —— 发送内容增量
+                                chunk_dict = await _llm_response_to_openai_stream(
+                                    llm_chunk, requested_model, id, is_final=False
+                                )
+                                yield f"data: {json.dumps(chunk_dict, ensure_ascii=False)}\n\n".encode("utf-8")
+                            else:
+
+                                # 最终响应 —— 只提取 usage，不发送内容
+                                final_resp = llm_chunk
+
+                                # 如果包含工具调用，需要以流式 chunk 形式发送
+                                if final_resp.tools_call_args:
+
+                                    # 构建 tool_calls 列表
+                                    tool_calls: list[dict] = []
+                                    for i, args in enumerate(final_resp.tools_call_args):
+                                        tool_calls.append({
+                                            "id": final_resp.tools_call_ids[i] if i < len(final_resp.tools_call_ids) else f"call_{i}",
+                                            "type": "function",
+                                            "function": {
+                                                "name": final_resp.tools_call_name[i] if i < len(final_resp.tools_call_name) else "",
+                                                "arguments": json.dumps(args, ensure_ascii=False),
                                             },
-                                            "finish_reason": "tool_calls",
-                                        }
-                                    ],
-                                    "usage": {
-                                        "prompt_tokens": final_resp.usage.input_other + final_resp.usage.input_cached if final_resp.usage else 0,
-                                        "completion_tokens": final_resp.usage.output if final_resp.usage else 0,
-                                        "total_tokens": final_resp.usage.input_other + final_resp.usage.input_cached + final_resp.usage.output if final_resp.usage else 0,
-                                    } if final_resp.usage else None,
-                                }
+                                        })
 
-                                # 移除 None 值的 usage
-                                if tool_chunk.get("usage") is None:
-                                    del tool_chunk["usage"]
-                                yield f"data: {json.dumps(tool_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
-                            
-                            # 如果存在 usage 且尚未发送，则单独发送一个 usage chunk
-                            elif final_resp.usage and not usage_sent:
-                                usage_chunk = {
-                                    "id": id,
-                                    "object": "chat.completion.chunk",
-                                    "created": int(time.time()),
-                                    "model": requested_model,
-                                    "choices": [
-                                        {
-                                            "index": 0,
-                                            "delta": {},   # 空 delta
-                                            "finish_reason": "tool_calls" if final_resp.tools_call_args else "stop",
-                                        }
-                                    ],
-                                    "usage": {
-                                        "prompt_tokens": final_resp.usage.input_other + final_resp.usage.input_cached if final_resp.usage else 0,
-                                        "completion_tokens": final_resp.usage.output if final_resp.usage else 0,
-                                        "total_tokens": final_resp.usage.input_other + final_resp.usage.input_cached + final_resp.usage.output if final_resp.usage else 0,
-                                    } if final_resp.usage else None,
-                                }
+                                    # 发送 tool_calls chunk
+                                    tool_chunk = {
+                                        "id": id,
+                                        "object": "chat.completion.chunk",
+                                        "created": int(time.time()),
+                                        "model": requested_model,
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": {
+                                                    "tool_calls": tool_calls
+                                                },
+                                                "finish_reason": "tool_calls",
+                                            }
+                                        ],
+                                        "usage": {
+                                            "prompt_tokens": final_resp.usage.input_other + final_resp.usage.input_cached if final_resp.usage else 0,
+                                            "completion_tokens": final_resp.usage.output if final_resp.usage else 0,
+                                            "total_tokens": final_resp.usage.input_other + final_resp.usage.input_cached + final_resp.usage.output if final_resp.usage else 0,
+                                        } if final_resp.usage else None,
+                                    }
 
-                                # 移除 None 值的 usage
-                                if usage_chunk.get("usage") is None:
-                                    del usage_chunk["usage"]
-                                yield f"data: {json.dumps(usage_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
-                                usage_sent = True
+                                    # 移除 None 值的 usage
+                                    if tool_chunk.get("usage") is None:
+                                        del tool_chunk["usage"]
+                                    yield f"data: {json.dumps(tool_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
+                                
+                                # 如果存在 usage 且尚未发送，则单独发送一个 usage chunk
+                                elif final_resp.usage and not usage_sent:
+                                    usage_chunk = {
+                                        "id": id,
+                                        "object": "chat.completion.chunk",
+                                        "created": int(time.time()),
+                                        "model": requested_model,
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": {},   # 空 delta
+                                                "finish_reason": "tool_calls" if final_resp.tools_call_args else "stop",
+                                            }
+                                        ],
+                                        "usage": {
+                                            "prompt_tokens": final_resp.usage.input_other + final_resp.usage.input_cached if final_resp.usage else 0,
+                                            "completion_tokens": final_resp.usage.output if final_resp.usage else 0,
+                                            "total_tokens": final_resp.usage.input_other + final_resp.usage.input_cached + final_resp.usage.output if final_resp.usage else 0,
+                                        } if final_resp.usage else None,
+                                    }
 
-                    # 发送结束标记
-                    yield b"data: [DONE]\n\n"
+                                    # 移除 None 值的 usage
+                                    if usage_chunk.get("usage") is None:
+                                        del usage_chunk["usage"]
+                                    yield f"data: {json.dumps(usage_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
+                                    usage_sent = True
 
-                    if log_resp and final_resp:
-                        logger.info(f"[响应日志] Provider={provider_id} 流式响应完成，内容长度 {len(final_resp.completion_text or '')}")
+                        # 发送结束标记
+                        yield b"data: [DONE]\n\n"
+
+                        if log_resp and final_resp:
+                            logger.info(f"[响应日志] Provider={provider_id} 流式响应完成，内容长度 {len(final_resp.completion_text or '')}")
+                    except Exception as e:
+                        logger.warning(f"Provider {provider_id} 流式请求生成器异常: {e}")
+                        await model_manager.mark_cooldown(provider_id, str(e))
+                        yield b'data: {"error": "provider error"}\n\n'
+                        yield b"data: [DONE]\n\n"
+                        return
 
                 return StreamingResponse(
                     stream_generator(),
@@ -337,10 +356,10 @@ def create_proxy_router(
                     },
                 )
 
-        except Exception as e:
-            logger.warning(f"Provider {provider_id} 请求失败: {e}")
-            await model_manager.mark_cooldown(provider_id, str(e))
-            return None
+            except Exception as e:
+                logger.warning(f"Provider {provider_id} 流式请求异常: {e}")
+                await model_manager.mark_cooldown(provider_id, str(e))
+                return None
 
     # ---------- 路由 ----------
     @router.post("/v1/chat/completions")
@@ -367,7 +386,7 @@ def create_proxy_router(
             return JSONResponse(status_code=503, content={"error": {"message": "该虚拟模型未配置任何 Provider"}})
 
         is_stream = body.get("stream", False)
-        max_retries = config.request_max_retries
+        max_retries = config.empty_response_max_attempts
         log_resp = config.log_response
 
         for pid in provider_ids:

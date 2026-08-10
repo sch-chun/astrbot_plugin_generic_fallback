@@ -8,4 +8,4 @@ class ProxyConfig:
     proxy_api_key: str = ""
     log_response: bool = False
     virtual_models: list[dict] = field(default_factory=list)
-    request_max_retries: int = 1
+    empty_response_max_attempts: int = 3
