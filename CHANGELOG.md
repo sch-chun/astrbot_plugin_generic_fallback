@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.5] - 2026-08-14
+
+### Fixed
+- 修复了无法正常捕获 no choices 错误的问题
+
 ## [0.0.4] - 2026-08-11
 
 ### Changed

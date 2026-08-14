@@ -215,17 +215,30 @@ def create_proxy_router(
                         **extra_kwargs,
                     )
                 except Exception as e:
+                    err_msg = str(e)
 
-                    # 任何异常直接冷却并返回None（不重试）
-                    logger.warning(f"Provider {provider_id} 请求异常: {e}")
-                    await model_manager.mark_cooldown(provider_id, str(e))
-                    return None
+                    # 判断是否为可重试的特定异常
+                    if "completion has no choices" in err_msg:
+                        logger.warning(f"Provider {provider_id} 请求异常 (尝试 {attempt}/{empty_response_max_attempts}): {e}")
+                        if attempt < empty_response_max_attempts:
+                            continue
+                        else:
+
+                            # 达到重试上限，进入冷却
+                            await model_manager.mark_cooldown(provider_id, err_msg)
+                            return None
+                    else:
+
+                        # 其他异常直接冷却
+                        logger.warning(f"Provider {provider_id} 请求异常: {e}")
+                        await model_manager.mark_cooldown(provider_id, err_msg)
+                        return None
 
                 # 检查空响应
                 if not llm_resp.completion_text and not llm_resp.tools_call_args:
                     logger.warning(f"Provider {provider_id} 返回空响应 (尝试 {attempt}/{empty_response_max_attempts})")
                     if attempt < empty_response_max_attempts:
-                        continue   # 重试
+                        continue
                     else:
                         await model_manager.mark_cooldown(provider_id, "空响应")
                         return None
