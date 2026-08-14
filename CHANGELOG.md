@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.6] - 2026-08-14
+
+### Changed
+- 现在请求因内容安全被过滤时不会触发冷却
+
 ## [0.0.5] - 2026-08-14
 
 ### Fixed
