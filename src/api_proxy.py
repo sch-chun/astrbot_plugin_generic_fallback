@@ -224,9 +224,11 @@ def create_proxy_router(
                             continue
                         else:
 
-                            # 达到重试上限，进入冷却
-                            await model_manager.mark_cooldown(provider_id, err_msg)
+                            # 达到重试上限，回退但不进入冷却
                             return None
+                    elif "内容安全过滤" in err_msg:
+                        logger.warning(f"Provider {provider_id} 请求因内容安全被拒，跳过: {e}")
+                        return None
                     else:
 
                         # 其他异常直接冷却
@@ -240,7 +242,8 @@ def create_proxy_router(
                     if attempt < empty_response_max_attempts:
                         continue
                     else:
-                        await model_manager.mark_cooldown(provider_id, "空响应")
+
+                        # 达到重试上限，回退但不进入冷却
                         return None
                 else:
                     openai_resp = _llm_response_to_openai_chat_completion(llm_resp, requested_model)
