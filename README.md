@@ -60,7 +60,7 @@ git clone https://github.com/sch-chun/astrbot_plugin_generic_fallback.git
 - 请求成功会**清零**该 Provider 的连续失败次数。
 - 冷却时长支持小数（如 `0.5` 表示 30 秒），填 `0` 表示不冷却。
 - 也接受等价的 JSON 字符串（如 `"[[1, 1], [2, 5]]"`）。
-- 空响应重试耗尽、`completion has no choices`、内容安全过滤、415 `Unsupported Media Type` 这几种情况**不计数、不冷却**，只会回退到下一个 Provider（后两者属于上游明确拒绝，重试无意义，不该惩罚 Provider）。
+- 空响应重试耗尽、`completion has no choices`、内容安全过滤、415 `Unsupported Media Type` 这几种情况**不计数、不冷却**，只会回退到下一个 Provider（后两者属于上游明确拒绝，重试无意义，不该惩罚 Provider）。**流式与非流式行为一致**：`completion has no choices` 在流式下没有重试，但仍然只回退不冷却。
 - 配置非法（不是列表、某项不是两项、阈值非正整数或重复、分钟数为负或非数字）时，插件会在日志里报错并**回退为默认值** `[[1, 1], [2, 5], [5, 30]]`。
 
 ## 使用

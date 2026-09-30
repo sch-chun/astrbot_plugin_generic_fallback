@@ -24,6 +24,14 @@
       </section>
     </div>
 
+    <!-- 插件页跑在 iframe 里，alert() 会被沙箱拦截，因此自己实现模态框 -->
+    <div id="modal" class="modal" hidden>
+      <div class="modal-panel">
+        <p id="modal-message"></p>
+        <button id="modal-ok">确定</button>
+      </div>
+    </div>
+
     <script type="module" src="./app.js"></script>
   </body>
 </html>

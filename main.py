@@ -201,6 +201,12 @@ class GenericFallbackProxyPlugin(Star):
             return json_response({"ok": False, "error": "disabled 必须是布尔值"})
 
         provider_id = provider_id.strip()
+
+        # 只允许操作回退链里真实存在的 Provider，避免脏 id 攒进 disabled_list
+        known_ids = {pid for v in self._virtual_models for pid in v.get("provider_ids", [])}
+        if provider_id not in known_ids:
+            return json_response({"ok": False, "error": f"provider_id '{provider_id}' 不在任何虚拟模型的回退链中"})
+
         await self._model_manager.set_disabled(provider_id, disabled)
         return json_response({"ok": True, "provider_id": provider_id, "disabled": disabled})
 

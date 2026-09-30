@@ -125,6 +125,17 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
   }
 }
 
+// 插件页在 iframe 沙箱里 alert() 会被拦截，用自建模态框代替
+function showModal(message) {
+  const modal = document.getElementById('modal');
+  document.getElementById('modal-message').textContent = message;
+  modal.hidden = false;
+}
+
+function closeModal() {
+  document.getElementById('modal').hidden = true;
+}
+
 async function onToggleClick(event) {
   const btn = event.currentTarget;
   const providerId = btn.dataset.pid;
@@ -137,7 +148,7 @@ async function onToggleClick(event) {
   } catch (err) {
     console.error('切换禁用状态失败:', err);
     btn.disabled = false;
-    alert(`操作失败: ${err && err.message ? err.message : err}`);
+    showModal(`操作失败: ${err && err.message ? err.message : err}`);
   }
 }
 
@@ -161,6 +172,14 @@ async function init() {
   await refreshDashboard();
 
   document.getElementById('refresh-btn').addEventListener('click', refreshDashboard);
+
+  document.getElementById('modal-ok').addEventListener('click', closeModal);
+  document.getElementById('modal').addEventListener('click', (event) => {
+    if (event.target.id === 'modal') closeModal();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeModal();
+  });
 
   // 每30秒自动刷新
   refreshTimer = setInterval(refreshDashboard, 30000);

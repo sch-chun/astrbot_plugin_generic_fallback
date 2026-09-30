@@ -21,6 +21,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - 配置列表不再被静默接受：非法 `cooldown_policy` 会在日志报错并回退为默认值
 - README 配置表移除已删除的 `show_model_tag`，补充 `empty_response_max_attempts` 与 `cooldown_policy`
+- 流式请求遇到 `completion has no choices` 不再进入冷却，与非流式行为保持一致
+- 流式成功计数移到 `data: [DONE]` 之前，客户端收完数据立刻断连也能清零连续失败次数
+- 禁用接口校验 `provider_id` 必须在虚拟模型回退链中，脏 id 不会再攒进 `disabled_list`
+- 监控面板用自建模态框替代 `alert()`（插件页跑在 iframe 沙箱里，`alert()` 会被拦截）
 
 ## [0.0.6] - 2026-08-14
 

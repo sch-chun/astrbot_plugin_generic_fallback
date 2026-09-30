@@ -135,6 +135,33 @@ async def test_content_filter_does_not_cooldown():
     assert client.get("/v1/status").json()["cooldown_count"] == 0
 
 
+async def test_no_choices_does_not_cooldown():
+    # 非流式下的 no choices 会先原地重试（默认 3 次），耗尽后回退但不冷却
+    provider = DummyProvider(error="completion has no choices")
+    app, _ = build_app(provider, policy=[[1, 1]])
+    client = TestClient(app)
+
+    assert chat(client).status_code == 503
+
+    assert provider.calls == 3  # 等于 empty_response_max_attempts 默认值
+    status = client.get("/v1/status").json()
+    assert status["cooldown_count"] == 0
+    assert status["fail_counts"] == {}
+
+
+async def test_stream_no_choices_does_not_cooldown():
+    # 流式没有重试机制，但仍应与非流式保持一致：只回退不冷却
+    provider = DummyProvider(error="completion has no choices")
+    app, _ = build_app(provider, policy=[[1, 1]])
+    client = TestClient(app)
+
+    assert chat(client, stream=True).status_code == 200
+
+    status = client.get("/v1/status").json()
+    assert status["cooldown_count"] == 0
+    assert status["fail_counts"] == {}
+
+
 async def test_stream_unsupported_media_type_does_not_cooldown():
     provider = DummyProvider(error="Unsupported Media Type")
     app, _ = build_app(provider, policy=[[1, 1]])

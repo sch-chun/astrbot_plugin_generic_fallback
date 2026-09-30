@@ -67,9 +67,17 @@ def create_proxy_router(
         return tool_set
 
     def _is_no_cooldown_error(err_msg: str) -> bool:
-        """判断异常是否属于「上游拒绝/不支持」——这类错误重试无意义，只回退不冷却"""
+        """判断异常是否属于「上游拒绝/无有效内容」——这类错误重试无意义，只回退不冷却
+
+        覆盖三类：内容安全过滤、415 Unsupported Media Type、completion has no choices。
+        （非流式下 no choices 会先走空响应重试，耗尽后同样是「回退不冷却」，与此处一致。）
+        """
         lowered = err_msg.lower()
-        return "内容安全过滤" in err_msg or "unsupported media type" in lowered
+        return (
+            "内容安全过滤" in err_msg
+            or "unsupported media type" in lowered
+            or "completion has no choices" in lowered
+        )
 
     def _extract_system_and_contexts(messages: list[dict]):
         system_prompt = None
@@ -356,10 +364,12 @@ def create_proxy_router(
                                     yield f"data: {json.dumps(usage_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
                                     usage_sent = True
 
+                        # 客户端收完数据可能立刻断连，此时生成器会在 yield 处被关闭、后续代码不再执行，
+                        # 因此成功计数必须在 [DONE] 之前清掉
+                        await model_manager.mark_success(provider_id)
+
                         # 发送结束标记
                         yield b"data: [DONE]\n\n"
-
-                        await model_manager.mark_success(provider_id)
 
                         if log_resp and final_resp:
                             logger.info(f"[响应日志] Provider={provider_id} 流式响应完成，内容长度 {len(final_resp.completion_text or '')}")

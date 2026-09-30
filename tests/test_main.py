@@ -169,6 +169,20 @@ async def test_set_disabled_handler_rejects_invalid_payload(monkeypatch):
     assert await plugin._model_manager.is_disabled("provider/a") is False
 
 
+async def test_set_disabled_handler_rejects_unknown_provider(monkeypatch):
+    # 脏 provider_id 会永久攒进 disabled_list，必须挡在入口
+    plugin = make_plugin({"virtual_models": [{"name": "vm", "provider_ids": ["provider/a"]}]})
+    monkeypatch.setattr(plugin, "_start_uvicorn", lambda: True)
+    await plugin.initialize()
+
+    result = await call_with_body(plugin, {"provider_id": "provider/ghost", "disabled": True})
+
+    assert result["ok"] is False
+    assert "回退链" in result["error"]
+    assert await plugin._model_manager.is_disabled("provider/ghost") is False
+    assert body_of(await plugin.status_handler())["disabled_list"] == []
+
+
 async def test_set_disabled_handler_strips_provider_id(monkeypatch):
     plugin = make_plugin({"virtual_models": [{"name": "vm", "provider_ids": ["provider/a"]}]})
     monkeypatch.setattr(plugin, "_start_uvicorn", lambda: True)
