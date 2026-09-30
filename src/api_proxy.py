@@ -66,6 +66,11 @@ def create_proxy_router(
             tool_set.add_tool(tool)
         return tool_set
 
+    def _is_no_cooldown_error(err_msg: str) -> bool:
+        """判断异常是否属于「上游拒绝/不支持」——这类错误重试无意义，只回退不冷却"""
+        lowered = err_msg.lower()
+        return "内容安全过滤" in err_msg or "unsupported media type" in lowered
+
     def _extract_system_and_contexts(messages: list[dict]):
         system_prompt = None
         contexts = []
@@ -226,8 +231,8 @@ def create_proxy_router(
 
                             # 达到重试上限，回退但不进入冷却
                             return None
-                    elif "内容安全过滤" in err_msg:
-                        logger.warning(f"Provider {provider_id} 请求因内容安全被拒，跳过: {e}")
+                    elif _is_no_cooldown_error(err_msg):
+                        logger.warning(f"Provider {provider_id} 请求被上游拒绝，跳过且不进入冷却: {e}")
                         return None
                     else:
 
@@ -247,6 +252,7 @@ def create_proxy_router(
                         return None
                 else:
                     openai_resp = _llm_response_to_openai_chat_completion(llm_resp, requested_model)
+                    await model_manager.mark_success(provider_id)
                     if log_resp:
                         logger.info(f"[响应日志] Provider={provider_id} 非流式响应: {json.dumps(openai_resp, ensure_ascii=False)[:500]}...")
                     return JSONResponse(content=openai_resp, status_code=200)
@@ -353,11 +359,14 @@ def create_proxy_router(
                         # 发送结束标记
                         yield b"data: [DONE]\n\n"
 
+                        await model_manager.mark_success(provider_id)
+
                         if log_resp and final_resp:
                             logger.info(f"[响应日志] Provider={provider_id} 流式响应完成，内容长度 {len(final_resp.completion_text or '')}")
                     except Exception as e:
                         logger.warning(f"Provider {provider_id} 流式请求生成器异常: {e}")
-                        await model_manager.mark_cooldown(provider_id, str(e))
+                        if not _is_no_cooldown_error(str(e)):
+                            await model_manager.mark_cooldown(provider_id, str(e))
                         yield b'data: {"error": "provider error"}\n\n'
                         yield b"data: [DONE]\n\n"
                         return
@@ -374,7 +383,8 @@ def create_proxy_router(
 
             except Exception as e:
                 logger.warning(f"Provider {provider_id} 流式请求异常: {e}")
-                await model_manager.mark_cooldown(provider_id, str(e))
+                if not _is_no_cooldown_error(str(e)):
+                    await model_manager.mark_cooldown(provider_id, str(e))
                 return None
 
     # ---------- 路由 ----------

@@ -207,3 +207,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# AstrBot 运行时数据（在插件目录下跑测试时会生成影子 data/）
+/data/
