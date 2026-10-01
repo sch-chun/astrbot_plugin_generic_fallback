@@ -1,5 +1,7 @@
 # Generic Fallback Proxy
 
+[![CI](https://github.com/sch-chun/astrbot_plugin_generic_fallback/actions/workflows/ci.yml/badge.svg)](https://github.com/sch-chun/astrbot_plugin_generic_fallback/actions/workflows/ci.yml)
+
 一个 AstrBot 插件，提供基于 Provider 回退链的通用 OpenAI 兼容代理服务。
 
 ## 功能

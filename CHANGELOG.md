@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - 连续失败计数：请求成功会清零对应 Provider 的连续失败次数
 - 监控面板支持随时禁用/解除禁用单个 Provider，并显示连续失败次数与当前冷却阶梯
 - 新增 pytest 测试套件（冷却策略校验、阶梯冷却、禁用/启用、代理路由）
+- 新增 GitHub Actions CI：Python 3.12 / 3.13 跑 pytest，ruff 静态检查，面板 JS 语法检查
 
 ### Changed
 - 冷却时长不再是固定的 60 秒，改为按配置的阶梯计算；冷却日志会打印连续失败次数与实际冷却分钟数
