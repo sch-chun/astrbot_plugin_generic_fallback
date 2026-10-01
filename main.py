@@ -20,10 +20,12 @@ from astrbot.api import logger, AstrBotConfig
 # 兼容旧版 json_response
 try:
     from astrbot.api.web import json_response
+    from astrbot.api.web import request as web_request
 except ImportError:
     from quart import jsonify as json_response
+    from quart import request as web_request
 
-from .src.config import ProxyConfig
+from .src.config import DEFAULT_COOLDOWN_POLICY, ProxyConfig, normalize_cooldown_policy
 from .src.model_manager import ModelManager
 from .src.api_proxy import create_proxy_router
 
@@ -105,6 +107,15 @@ class GenericFallbackProxyPlugin(Star):
         empty_response_max_attempts = int(self.config.get("empty_response_max_attempts", 3))
         log_response = bool(self.config.get("log_response", False))
 
+        # 冷却阶梯：[[连续失败次数, 冷却分钟数], ...]，非法配置回退到默认值
+        try:
+            cooldown_policy = normalize_cooldown_policy(
+                self.config.get("cooldown_policy", DEFAULT_COOLDOWN_POLICY)
+            )
+        except ValueError as e:
+            logger.error(f"❌ cooldown_policy 配置无效（{e}），将使用默认策略 {DEFAULT_COOLDOWN_POLICY}")
+            cooldown_policy = normalize_cooldown_policy(DEFAULT_COOLDOWN_POLICY)
+
         # 3. 创建 ProxyConfig
         self._proxy_config = ProxyConfig(
             proxy_host=proxy_host,
@@ -112,11 +123,12 @@ class GenericFallbackProxyPlugin(Star):
             proxy_api_key=proxy_api_key,
             log_response=log_response,
             virtual_models=self._virtual_models,
-            empty_response_max_attempts=empty_response_max_attempts
+            empty_response_max_attempts=empty_response_max_attempts,
+            cooldown_policy=cooldown_policy
         )
 
         # 4. 初始化模型管理器
-        self._model_manager = ModelManager()
+        self._model_manager = ModelManager(cooldown_policy=cooldown_policy)
 
         # 5. 注册 Web API
         self.context.register_web_api(
@@ -124,6 +136,12 @@ class GenericFallbackProxyPlugin(Star):
             self.status_handler,
             ["GET"],
             "获取代理状态"
+        )
+        self.context.register_web_api(
+            f"/{self._plugin_name}/provider/set_disabled",
+            self.set_provider_disabled_handler,
+            ["POST"],
+            "禁用或解除禁用 Provider"
         )
 
         # 6. 创建 FastAPI 应用
@@ -167,6 +185,38 @@ class GenericFallbackProxyPlugin(Star):
             for v in self._virtual_models
         ]
         return json_response(status)
+
+    async def set_provider_disabled_handler(self) -> Union[Response, JSONResponse]:
+        """处理监控面板的禁用/解除禁用请求"""
+        if not self._model_manager:
+            return json_response({"ok": False, "error": "服务未初始化"})
+
+        payload = await self._read_json_body()
+        provider_id = payload.get("provider_id")
+        disabled = payload.get("disabled")
+
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return json_response({"ok": False, "error": "provider_id 不能为空"})
+        if not isinstance(disabled, bool):
+            return json_response({"ok": False, "error": "disabled 必须是布尔值"})
+
+        provider_id = provider_id.strip()
+
+        # 只允许操作回退链里真实存在的 Provider，避免脏 id 攒进 disabled_list
+        known_ids = {pid for v in self._virtual_models for pid in v.get("provider_ids", [])}
+        if provider_id not in known_ids:
+            return json_response({"ok": False, "error": f"provider_id '{provider_id}' 不在任何虚拟模型的回退链中"})
+
+        await self._model_manager.set_disabled(provider_id, disabled)
+        return json_response({"ok": True, "provider_id": provider_id, "disabled": disabled})
+
+    async def _read_json_body(self) -> dict:
+        """读取插件 Web API 的请求体并解析为 dict"""
+        try:
+            data = await web_request.json(default={})
+        except (AttributeError, TypeError):
+            data = await web_request.get_json(silent=True) or {}
+        return data if isinstance(data, dict) else {}
 
     def _start_uvicorn(self) -> bool:
         assert self._fastapi_app is not None

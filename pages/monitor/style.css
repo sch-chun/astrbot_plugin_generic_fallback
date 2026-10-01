@@ -100,19 +100,25 @@ h1 {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
-  display: flex;
-  flex-direction: column;
 }
 
+/* 模型名独占一行，避免被右侧按钮挤压换行 */
 .provider-card .name {
   font-weight: 500;
   font-size: 14px;
   word-break: break-word;
 }
 
+.provider-card .status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
 .provider-card .status {
   font-size: 13px;
-  margin-top: 6px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -126,9 +132,88 @@ h1 {
 }
 .dot.available { background: var(--success); }
 .dot.cooldown { background: var(--warning); }
+.dot.disabled { background: var(--danger); }
 
 .provider-card .cooldown-timer {
   margin-top: 6px;
   font-size: 13px;
   color: var(--warning);
+}
+
+.provider-card .fail-count {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #888;
+}
+
+.toggle-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  min-width: 60px;
+  flex-shrink: 0;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.toggle-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#policy-hint {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #888;
+}
+
+/* 自建模态框：插件页在 iframe 沙箱内 alert() 不可用 */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal[hidden] {
+  display: none;
+}
+
+.modal-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  width: calc(100% - 40px);
+  max-width: 420px;
+}
+
+.modal-panel p {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+#modal-ok {
+  display: block;
+  margin-left: auto;
+  background: var(--primary);
+  color: white;
+  border: none;
+  padding: 6px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#modal-ok:hover {
+  opacity: 0.85;
 }
