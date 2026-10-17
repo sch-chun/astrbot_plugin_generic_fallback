@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- `ModelManager` 的锁由 `asyncio.Lock` 改为 `threading.Lock`：代理服务跑在独立线程的事件循环里，
+  监控面板（AstrBot 主循环）与代理请求（线程循环）会并发操作 `ModelManager`，`asyncio.Lock`
+  会绑定到首个进入慢路径的事件循环，另一循环再竞争即抛跨循环 `RuntimeError`，或因跨线程唤醒
+  丢失把请求拖住数秒。临界区均为无 `await` 的内存字典操作，`threading.Lock` 与事件循环无关，
+  且提供真正的跨线程互斥
+
 ## [0.0.7] - 2026-09-30
 
 ### Added

@@ -1,4 +1,4 @@
-import asyncio
+import threading
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -13,7 +13,13 @@ from .config import (
 
 class ModelManager:
     def __init__(self, cooldown_policy: Any | None = None):
-        self._lock = asyncio.Lock()
+        # 代理服务跑在独立线程的事件循环里，监控面板（AstrBot 主循环）与代理请求
+        # （线程循环）会并发操作本类。asyncio.Lock 会绑定到首个进入慢路径的事件循环，
+        # 另一循环再竞争即抛跨循环 RuntimeError，且它本就无法提供跨线程互斥。
+        # 临界区全是无 await 的内存字典操作，改用 threading.Lock：与事件循环无关，
+        # 且提供真正的跨线程互斥。
+        # 约束：临界区内不得引入 await，否则会阻塞所在线程的事件循环。
+        self._lock = threading.Lock()
         self._cooldown: dict[str, datetime] = {}  # provider_id -> 冷却结束时间
         self._fail_counts: dict[str, int] = {}  # provider_id -> 连续失败次数
         self._disabled: set[str] = set()  # 被手动禁用的 provider_id
@@ -28,7 +34,7 @@ class ModelManager:
 
     async def is_available(self, provider_id: str) -> bool:
         """检查 Provider 是否可用（未被禁用且不在冷却中）"""
-        async with self._lock:
+        with self._lock:
             if provider_id in self._disabled:
                 return False
             if provider_id not in self._cooldown:
@@ -40,12 +46,12 @@ class ModelManager:
 
     async def mark_success(self, provider_id: str) -> None:
         """清零 Provider 的连续失败次数"""
-        async with self._lock:
+        with self._lock:
             self._fail_counts.pop(provider_id, None)
 
     async def mark_cooldown(self, provider_id: str, reason: str = "") -> None:
         """累加连续失败次数，并按冷却阶梯标记 Provider 进入冷却"""
-        async with self._lock:
+        with self._lock:
             failures = self._fail_counts.get(provider_id, 0) + 1
             self._fail_counts[provider_id] = failures
             minutes = resolve_cooldown_minutes(self._cooldown_policy, failures)
@@ -54,7 +60,7 @@ class ModelManager:
 
     async def set_disabled(self, provider_id: str, disabled: bool) -> None:
         """手动禁用或解除禁用 Provider"""
-        async with self._lock:
+        with self._lock:
             if disabled:
                 self._disabled.add(provider_id)
             else:
@@ -65,19 +71,19 @@ class ModelManager:
 
     async def is_disabled(self, provider_id: str) -> bool:
         """检查 Provider 是否被手动禁用"""
-        async with self._lock:
+        with self._lock:
             return provider_id in self._disabled
 
     async def clear_all(self) -> None:
         """清空所有冷却与连续失败计数（手动禁用状态保留）"""
-        async with self._lock:
+        with self._lock:
             self._cooldown.clear()
             self._fail_counts.clear()
         logger.info("已清空所有 Provider 冷却状态")
 
     async def get_status(self) -> dict:
         """获取当前状态（用于 Web API）"""
-        async with self._lock:
+        with self._lock:
             now = datetime.now()
             cooldown_list = [
                 {

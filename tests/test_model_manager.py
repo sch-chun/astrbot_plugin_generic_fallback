@@ -1,5 +1,7 @@
 """ModelManager 的冷却阶梯、成功清零与手动禁用测试。"""
 import asyncio
+import threading
+import time
 
 import pytest
 
@@ -157,3 +159,62 @@ async def test_providers_are_tracked_independently():
     await manager.clear_all()
     assert await manager.is_available(PROVIDER) is True
     assert await manager.is_available(other) is True
+
+
+async def test_lock_is_safe_across_two_event_loops(monkeypatch):
+    """回归：两个事件循环（线程循环 + 主循环）并发操作不得报错或挂死。
+
+    插件把代理服务跑在独立线程的事件循环里，监控面板（AstrBot 主循环）与代理请求
+    （线程循环）会并发调用 ModelManager。asyncio.Lock 会绑定到首个进入慢路径的事件
+    循环，另一循环再竞争即抛跨循环 RuntimeError，或因跨线程唤醒丢失而挂死。
+    """
+    manager = ModelManager()
+
+    def slow_resolve(policy, consecutive_failures):
+        # 扩大临界区窗口，保证两个循环稳定撞进同一把锁
+        time.sleep(0.2)
+        return 1.0
+
+    monkeypatch.setattr(
+        "astrbot_plugin_generic_fallback.src.model_manager.resolve_cooldown_minutes",
+        slow_resolve,
+    )
+
+    errors: list[Exception] = []
+    entered = threading.Event()
+
+    def thread_body():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        entered.set()
+        try:
+            loop.run_until_complete(manager.mark_cooldown(PROVIDER, "thread"))
+        except Exception as e:
+            errors.append(e)
+        finally:
+            loop.close()
+
+    worker = threading.Thread(target=thread_body)
+    worker.start()
+    assert entered.wait(timeout=2)
+    await asyncio.sleep(0.02)  # 等线程循环先拿到锁
+
+    started = time.monotonic()
+    try:
+        await asyncio.wait_for(manager.mark_cooldown(PROVIDER, "main"), timeout=2)
+    except asyncio.TimeoutError:
+        pytest.fail("主循环在 ModelManager 锁上挂死：锁被绑定到了另一事件循环")
+    elapsed = time.monotonic() - started
+
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert not errors
+
+    # 关键断言：旧实现（asyncio.Lock）会把主循环挂到跨线程 future 上，持锁线程
+    # set_result 时无法唤醒主循环的 selector，只能等下一个定时器（此处的 wait_for
+    # 2s）才被"救回"——表现为耗时被拖到约 2s。新实现在锁上同步等待，持锁方一放行
+    # 当即继续，耗时只略大于临界区时长（0.2s）。
+    assert elapsed < 0.5, f"主循环等待锁耗时 {elapsed:.2f}s，疑似被跨线程唤醒丢失拖住"
+
+    status = await manager.get_status()
+    assert status["fail_counts"] == {PROVIDER: 2}
