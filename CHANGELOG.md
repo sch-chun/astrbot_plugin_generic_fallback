@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - 监控面板 Provider 卡片：剩余冷却时间与连续失败次数合并为同一行展示
-- 启动时端口被占用的提示补充可能原因与排查命令（刚重载过插件时，疑似上次尚未返回的模型调用——尤其是流式请求——仍阻塞旧代理线程持有端口）
+- 启动时端口被占用的提示补充可能原因与排查命令（刚重载过插件时，疑似上次尚未返回的模型调用仍阻塞旧代理线程持有端口）
 
 ### Fixed
 - `ModelManager` 的锁由 `asyncio.Lock` 改为 `threading.Lock`：代理服务跑在独立线程的事件循环里，
