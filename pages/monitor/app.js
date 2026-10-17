@@ -1,5 +1,8 @@
 const bridge = window.AstrBotPluginPage;
+const MODAL_ANIM_MS = 200;
 let refreshTimer = null;
+let firstLoadDone = false;
+let firstRenderDone = false;
 
 async function fetchStatus() {
   try {
@@ -42,6 +45,14 @@ function renderPolicy(policy) {
     return `${failures} 次→${formatMinutes(minutes)}`;
   });
   el.textContent = `冷却阶梯: ${parts.join('，')}`;
+}
+
+function renderLoading(container) {
+  container.innerHTML = `
+    <div class="loading-box">
+      <span class="spinner"></span>
+      <span>加载中…</span>
+    </div>`;
 }
 
 function renderVirtualModels(virtualModels, cooldownList, disabledList, failCounts) {
@@ -126,6 +137,9 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
     }
     html += `</div></div>`;
   }
+  // 首次渲染时分组依次淡入；之后每 30s 的自动刷新不再重放动画，避免干扰阅读
+  container.classList.toggle('first-load', !firstRenderDone);
+  firstRenderDone = true;
   container.innerHTML = html;
 
   for (const btn of container.querySelectorAll('.toggle-btn')) {
@@ -137,18 +151,38 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
 }
 
 // 插件页在 iframe 沙箱里 alert() 会被拦截，用自建模态框代替
+// ---------- 模态框开合（带入场/退场动画） ----------
+function openModalEl(el) {
+  if (el._hideTimer) {
+    clearTimeout(el._hideTimer);
+    el._hideTimer = null;
+  }
+  el.hidden = false;
+  void el.offsetWidth; // 强制回流，让过渡从初始态开始播放
+  el.classList.add('is-open');
+}
+
+function closeModalEl(el) {
+  el.classList.remove('is-open');
+  if (el._hideTimer) clearTimeout(el._hideTimer);
+  // 退场动画播完后再隐藏：hidden 会直接 display:none，看不到退场
+  el._hideTimer = setTimeout(() => {
+    el.hidden = true;
+    el._hideTimer = null;
+  }, MODAL_ANIM_MS);
+}
+
 function showModal(message) {
-  const modal = document.getElementById('modal');
   document.getElementById('modal-message').textContent = message;
-  modal.hidden = false;
+  openModalEl(document.getElementById('modal'));
 }
 
 function closeModal() {
-  document.getElementById('modal').hidden = true;
+  closeModalEl(document.getElementById('modal'));
 }
 
 function closeLogModal() {
-  document.getElementById('log-modal').hidden = true;
+  closeModalEl(document.getElementById('log-modal'));
 }
 
 function formatLogTime(iso) {
@@ -157,27 +191,36 @@ function formatLogTime(iso) {
   return date.toLocaleString();
 }
 
-function renderLogModal(providerId, logs) {
+function openLogModal(providerId) {
   document.getElementById('log-title').textContent = `调用日志：${providerId}`;
+  document.getElementById('log-list').innerHTML = `
+    <div class="loading-box">
+      <span class="spinner"></span>
+      <span>加载中…</span>
+    </div>`;
+  openModalEl(document.getElementById('log-modal'));
+}
+
+function fillLogModal(logs) {
   const list = document.getElementById('log-list');
 
   if (!logs || logs.length === 0) {
     list.innerHTML = '<p class="log-empty">暂无调用记录</p>';
-  } else {
-    let html = '';
-    for (const entry of logs) {
-      const ok = !!entry.success;
-      html += `<div class="log-item">
-        <div class="log-head">
-          <span class="log-time">${escapeHtml(formatLogTime(entry.time))}</span>
-          <span class="log-badge ${ok ? 'ok' : 'fail'}">${ok ? '成功' : '失败'}</span>
-        </div>
-        ${entry.reason ? `<div class="log-reason">${escapeHtml(entry.reason)}</div>` : ''}
-      </div>`;
-    }
-    list.innerHTML = html;
+    return;
   }
-  document.getElementById('log-modal').hidden = false;
+
+  let html = '';
+  for (const entry of logs) {
+    const ok = !!entry.success;
+    html += `<div class="log-item">
+      <div class="log-head">
+        <span class="log-time">${escapeHtml(formatLogTime(entry.time))}</span>
+        <span class="log-badge ${ok ? 'ok' : 'fail'}">${ok ? '成功' : '失败'}</span>
+      </div>
+      ${entry.reason ? `<div class="log-reason">${escapeHtml(entry.reason)}</div>` : ''}
+    </div>`;
+  }
+  list.innerHTML = html;
 }
 
 async function onLogClick(event) {
@@ -185,11 +228,13 @@ async function onLogClick(event) {
   const providerId = btn.dataset.pid;
 
   btn.disabled = true;
+  openLogModal(providerId); // 先以加载态打开，避免空窗
   try {
     const data = await bridge.apiGet('logs', { provider_id: providerId });
-    renderLogModal(providerId, (data && data.logs) || []);
+    fillLogModal((data && data.logs) || []);
   } catch (err) {
     console.error('获取调用日志失败:', err);
+    closeLogModal();
     showModal(`获取调用日志失败: ${err && err.message ? err.message : err}`);
   } finally {
     btn.disabled = false;
@@ -213,11 +258,18 @@ async function onToggleClick(event) {
 }
 
 async function refreshDashboard() {
+  const container = document.getElementById('virtual-models');
+  // 仅首次加载显示占位；之后的定时刷新直接换内容，避免每 30s 闪一下
+  if (!firstLoadDone) {
+    renderLoading(container);
+  }
+
   const data = await fetchStatus();
   if (!data) {
-    document.getElementById('virtual-models').innerHTML = '<p>加载失败，请重试</p>';
+    container.innerHTML = '<p>加载失败，请重试</p>';
     return;
   }
+  firstLoadDone = true;
 
   renderPolicy(data.cooldown_policy);
   renderVirtualModels(data.virtual_models, data.cooldown_list, data.disabled_list, data.fail_counts);

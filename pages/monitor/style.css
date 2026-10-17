@@ -28,6 +28,50 @@ body {
 #app {
   max-width: 1200px;
   margin: 0 auto;
+  animation: page-in 0.35s ease both;
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 首次渲染时虚拟模型分组依次淡入；模态框在 body 级、不受 #app 变换影响 */
+#virtual-models.first-load .virtual-model-section {
+  animation: section-in 0.3s ease both;
+}
+#virtual-models.first-load .virtual-model-section:nth-child(2) { animation-delay: 0.06s; }
+#virtual-models.first-load .virtual-model-section:nth-child(3) { animation-delay: 0.12s; }
+#virtual-models.first-load .virtual-model-section:nth-child(4) { animation-delay: 0.18s; }
+#virtual-models.first-load .virtual-model-section:nth-child(n+5) { animation-delay: 0.24s; }
+
+@keyframes section-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 加载占位（首屏与日志弹层共用） */
+.loading-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 0;
+  color: #888;
+  font-size: 13px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 header {
@@ -56,9 +100,13 @@ h1 {
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
 }
 #refresh-btn:hover {
   opacity: 0.85;
+}
+#refresh-btn:active {
+  transform: scale(0.97);
 }
 
 #last-update {
@@ -170,14 +218,21 @@ h1 {
   text-align: center;
   white-space: nowrap;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.1s ease, opacity 0.2s ease;
 }
 .btn-outline:hover {
   border-color: var(--primary);
   color: var(--primary);
 }
+.btn-outline:active {
+  transform: scale(0.97);
+}
 .btn-outline:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.btn-outline:disabled:active {
+  transform: none;
 }
 
 /* 「禁用/解禁」两态等宽；「日志」单态可窄一些 */
@@ -191,6 +246,7 @@ h1 {
 }
 
 /* 自建模态框：插件页在 iframe 沙箱内 alert() 不可用 */
+/* 出入场动画：遮罩淡入淡出，面板上移+缩放淡入；hidden 在退场结束后才置上 */
 .modal {
   position: fixed;
   inset: 0;
@@ -199,6 +255,11 @@ h1 {
   align-items: center;
   justify-content: center;
   z-index: 100;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.modal.is-open {
+  opacity: 1;
 }
 .modal[hidden] {
   display: none;
@@ -211,6 +272,13 @@ h1 {
   padding: 18px 20px;
   width: calc(100% - 40px);
   max-width: 420px;
+  transform: translateY(8px) scale(0.97);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.modal.is-open .modal-panel {
+  transform: none;
+  opacity: 1;
 }
 
 .modal-panel p {
@@ -229,9 +297,13 @@ h1 {
   padding: 6px 18px;
   border-radius: 6px;
   cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
 }
 #modal-ok:hover {
   opacity: 0.85;
+}
+#modal-ok:active {
+  transform: scale(0.97);
 }
 
 /* 调用日志模态框 */
@@ -258,10 +330,25 @@ h1 {
   overflow-y: auto;
 }
 
-.log-empty {
+/* 覆盖 .modal-panel p 的默认 margin */
+.modal-panel .log-empty {
   margin: 0;
   font-size: 13px;
   color: #888;
+}
+
+/* 日志条目淡入：只错峰前几条，长列表不眼花 */
+.modal.is-open .log-item {
+  animation: log-item-in 0.25s ease both;
+}
+.modal.is-open .log-item:nth-child(2) { animation-delay: 0.04s; }
+.modal.is-open .log-item:nth-child(3) { animation-delay: 0.08s; }
+.modal.is-open .log-item:nth-child(4) { animation-delay: 0.12s; }
+.modal.is-open .log-item:nth-child(n+5) { animation-delay: 0.16s; }
+
+@keyframes log-item-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
 }
 
 .log-item {
@@ -294,4 +381,21 @@ h1 {
   color: #888;
   line-height: 1.5;
   word-break: break-word;
+}
+
+/* 减少动态效果偏好：淡入、错峰与按压反馈全部即时完成 */
+@media (prefers-reduced-motion: reduce) {
+  #app,
+  .virtual-models.first-load .virtual-model-section,
+  .spinner,
+  .modal,
+  .modal-panel,
+  .modal.is-open .log-item,
+  .btn-outline,
+  #refresh-btn,
+  #modal-ok {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
