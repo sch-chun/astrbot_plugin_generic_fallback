@@ -247,6 +247,15 @@ class GenericFallbackProxyPlugin(Star):
         for attempt in range(5):
             if self._is_port_available(port, host):
                 break
+            if attempt == 0:
+                # 刚重载/重启过插件时，上次的模型调用（尤其是流式请求）可能还没收到返回，
+                # 旧服务线程仍在等待其结束，端口随之未被释放
+                logger.warning(
+                    f"端口 {host}:{port} 被占用。若刚重载或重启过插件，可能是上次的模型调用"
+                    "（尤其是流式请求）尚未返回，旧代理线程仍在等待连接关闭、端口未释放；"
+                    "下面会自动重试数次，若持续失败可查看占用进程："
+                    f"netstat -ano | findstr :{port}（Windows）或 ss -ltnp | grep {port}（Linux）"
+                )
             if attempt < 4:
                 logger.warning(f"端口 {host}:{port} 被占用，等待 0.5 秒后重试 ({attempt+1}/5)")
                 time.sleep(0.5)
