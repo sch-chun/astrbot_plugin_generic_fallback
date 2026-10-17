@@ -143,6 +143,12 @@ class GenericFallbackProxyPlugin(Star):
             ["POST"],
             "禁用或解除禁用 Provider"
         )
+        self.context.register_web_api(
+            f"/{self._plugin_name}/logs",
+            self.logs_handler,
+            ["GET"],
+            "获取指定 Provider 的近期调用记录"
+        )
 
         # 6. 创建 FastAPI 应用
         self._fastapi_app = FastAPI(title="Generic Fallback", version="1.0.0")
@@ -186,6 +192,19 @@ class GenericFallbackProxyPlugin(Star):
         ]
         return json_response(status)
 
+    async def logs_handler(self) -> Union[Response, JSONResponse]:
+        """返回指定 Provider 的近期调用记录（时间、成败、失败原因）"""
+        if not self._model_manager:
+            return json_response({"error": "服务未初始化"})
+
+        provider_id = web_request.query.get("provider_id", "")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return json_response({"error": "provider_id 不能为空"})
+        provider_id = provider_id.strip()
+
+        logs = await self._model_manager.get_call_log(provider_id)
+        return json_response({"provider_id": provider_id, "logs": logs})
+
     async def set_provider_disabled_handler(self) -> Union[Response, JSONResponse]:
         """处理监控面板的禁用/解除禁用请求"""
         if not self._model_manager:
@@ -228,6 +247,15 @@ class GenericFallbackProxyPlugin(Star):
         for attempt in range(5):
             if self._is_port_available(port, host):
                 break
+            if attempt == 0:
+                # 刚重载/重启过插件时，上次的模型调用可能还没收到返回，
+                # 旧服务线程仍在等待其结束，端口随之未被释放
+                logger.warning(
+                    f"端口 {host}:{port} 被占用。若刚重载或重启过插件，可能是上次的模型调用"
+                    "尚未返回，旧代理线程仍在等待连接关闭、端口未释放；"
+                    "下面会自动重试数次，若持续失败可查看占用进程："
+                    f"netstat -ano | findstr :{port}（Windows）或 ss -ltnp | grep {port}（Linux）"
+                )
             if attempt < 4:
                 logger.warning(f"端口 {host}:{port} 被占用，等待 0.5 秒后重试 ({attempt+1}/5)")
                 time.sleep(0.5)

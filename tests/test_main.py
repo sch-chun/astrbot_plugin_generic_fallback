@@ -8,6 +8,7 @@ from astrbot_plugin_generic_fallback.main import GenericFallbackProxyPlugin
 DEFAULT_POLICY = [[1, 1], [2, 5], [5, 30]]
 STATUS_ROUTE = "/generic_fallback/status"
 DISABLE_ROUTE = "/generic_fallback/provider/set_disabled"
+LOGS_ROUTE = "/generic_fallback/logs"
 
 
 class FakeContext:
@@ -24,12 +25,12 @@ class FakeContext:
 class FakeRawRequest:
     """构造 astrbot.api.web.PluginRequest 所需的原始请求对象"""
 
-    def __init__(self, payload):
+    def __init__(self, payload, query=None):
         self.method = "POST"
         self.url = SimpleNamespace(path="/api/test")
         self.headers = {}
         self.cookies = {}
-        self.query_params = SimpleNamespace(multi_items=lambda: [])
+        self.query_params = SimpleNamespace(multi_items=lambda: list(query or []))
         self.client = None
         self._payload = payload
 
@@ -50,6 +51,11 @@ async def call_with_body(plugin: GenericFallbackProxyPlugin, payload):
         return body_of(await plugin.set_provider_disabled_handler())
 
 
+async def call_logs(plugin: GenericFallbackProxyPlugin, provider_id):
+    with bind_request_context(PluginRequest(FakeRawRequest(None, query=[("provider_id", provider_id)]))):
+        return body_of(await plugin.logs_handler())
+
+
 async def test_initialize_registers_web_apis(monkeypatch):
     plugin = make_plugin({
         "virtual_models": [{"name": "vm", "provider_ids": ["provider/a"]}],
@@ -61,6 +67,7 @@ async def test_initialize_registers_web_apis(monkeypatch):
     routes = [route for route, _, _, _ in plugin.context.registered_web_apis]
     assert STATUS_ROUTE in routes
     assert DISABLE_ROUTE in routes
+    assert LOGS_ROUTE in routes
     assert plugin._model_manager is not None
     assert plugin._model_manager.cooldown_policy == DEFAULT_POLICY
 
@@ -201,3 +208,44 @@ async def test_set_disabled_handler_when_uninitialized():
         "ok": False,
         "error": "服务未初始化",
     }
+
+
+async def test_logs_handler_returns_provider_call_log(monkeypatch):
+    plugin = make_plugin({"virtual_models": [{"name": "vm", "provider_ids": ["provider/a"]}]})
+    monkeypatch.setattr(plugin, "_start_uvicorn", lambda: True)
+    await plugin.initialize()
+    await plugin._model_manager.record_call("provider/a", False, "boom")
+    await plugin._model_manager.record_call("provider/a", True)
+
+    result = await call_logs(plugin, "provider/a")
+
+    assert result["provider_id"] == "provider/a"
+    assert [entry["success"] for entry in result["logs"]] == [True, False]  # 最新在前
+    assert result["logs"][1]["reason"] == "boom"
+
+
+async def test_logs_handler_strips_provider_id(monkeypatch):
+    plugin = make_plugin({"virtual_models": [{"name": "vm", "provider_ids": ["provider/a"]}]})
+    monkeypatch.setattr(plugin, "_start_uvicorn", lambda: True)
+    await plugin.initialize()
+    await plugin._model_manager.record_call("provider/a", True)
+
+    result = await call_logs(plugin, "  provider/a  ")
+
+    assert result["provider_id"] == "provider/a"
+    assert len(result["logs"]) == 1
+
+
+async def test_logs_handler_rejects_empty_provider_id(monkeypatch):
+    plugin = make_plugin({"virtual_models": [{"name": "vm", "provider_ids": ["provider/a"]}]})
+    monkeypatch.setattr(plugin, "_start_uvicorn", lambda: True)
+    await plugin.initialize()
+
+    assert await call_logs(plugin, "") == {"error": "provider_id 不能为空"}
+    assert await call_logs(plugin, "   ") == {"error": "provider_id 不能为空"}
+
+
+async def test_logs_handler_when_uninitialized():
+    plugin = make_plugin({})
+
+    assert await call_logs(plugin, "provider/a") == {"error": "服务未初始化"}

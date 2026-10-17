@@ -28,6 +28,50 @@ body {
 #app {
   max-width: 1200px;
   margin: 0 auto;
+  animation: page-in 0.35s ease both;
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 首次渲染时虚拟模型分组依次淡入；模态框在 body 级、不受 #app 变换影响 */
+#virtual-models.first-load .virtual-model-section {
+  animation: section-in 0.3s ease both;
+}
+#virtual-models.first-load .virtual-model-section:nth-child(2) { animation-delay: 0.06s; }
+#virtual-models.first-load .virtual-model-section:nth-child(3) { animation-delay: 0.12s; }
+#virtual-models.first-load .virtual-model-section:nth-child(4) { animation-delay: 0.18s; }
+#virtual-models.first-load .virtual-model-section:nth-child(n+5) { animation-delay: 0.24s; }
+
+@keyframes section-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 加载占位（首屏与日志弹层共用） */
+.loading-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 0;
+  color: #888;
+  font-size: 13px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 header {
@@ -56,9 +100,13 @@ h1 {
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
 }
 #refresh-btn:hover {
   opacity: 0.85;
+}
+#refresh-btn:active {
+  transform: scale(0.97);
 }
 
 #last-update {
@@ -90,7 +138,7 @@ h1 {
 
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
   margin-top: 10px;
 }
@@ -134,39 +182,62 @@ h1 {
 .dot.cooldown { background: var(--warning); }
 .dot.disabled { background: var(--danger); }
 
-.provider-card .cooldown-timer {
+/* 剩余冷却时间与连续失败次数合并一行 */
+.provider-card .provider-meta {
   margin-top: 6px;
   font-size: 13px;
+  color: #888;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.provider-meta .meta-cooldown {
   color: var(--warning);
 }
-
-.provider-card .fail-count {
-  margin-top: 4px;
-  font-size: 13px;
-  color: #888;
+.provider-meta .meta-sep {
+  color: var(--border);
 }
 
-.toggle-btn {
+/* 卡片右侧操作区：禁用/解禁 + 日志 */
+.card-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 描边按钮：Provider 卡片与日志模态框共用 */
+.btn-outline {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 13px;
-  min-width: 60px;
   flex-shrink: 0;
   text-align: center;
   white-space: nowrap;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.1s ease, opacity 0.2s ease;
 }
-.toggle-btn:hover {
+.btn-outline:hover {
   border-color: var(--primary);
   color: var(--primary);
 }
-.toggle-btn:disabled {
+.btn-outline:active {
+  transform: scale(0.97);
+}
+.btn-outline:disabled {
   opacity: 0.5;
   cursor: default;
 }
+.btn-outline:disabled:active {
+  transform: none;
+}
+
+/* 「禁用/解禁」两态等宽；「日志」单态可窄一些 */
+.provider-card .toggle-btn { min-width: 60px; }
+.provider-card .log-btn { min-width: 44px; }
 
 #policy-hint {
   margin-top: 6px;
@@ -175,6 +246,7 @@ h1 {
 }
 
 /* 自建模态框：插件页在 iframe 沙箱内 alert() 不可用 */
+/* 出入场动画：遮罩淡入淡出，面板上移+缩放淡入；hidden 在退场结束后才置上 */
 .modal {
   position: fixed;
   inset: 0;
@@ -183,6 +255,11 @@ h1 {
   align-items: center;
   justify-content: center;
   z-index: 100;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.modal.is-open {
+  opacity: 1;
 }
 .modal[hidden] {
   display: none;
@@ -195,6 +272,13 @@ h1 {
   padding: 18px 20px;
   width: calc(100% - 40px);
   max-width: 420px;
+  transform: translateY(8px) scale(0.97);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.modal.is-open .modal-panel {
+  transform: none;
+  opacity: 1;
 }
 
 .modal-panel p {
@@ -213,7 +297,105 @@ h1 {
   padding: 6px 18px;
   border-radius: 6px;
   cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
 }
 #modal-ok:hover {
   opacity: 0.85;
+}
+#modal-ok:active {
+  transform: scale(0.97);
+}
+
+/* 调用日志模态框 */
+.log-panel {
+  max-width: 560px;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+#log-title {
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.log-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* 覆盖 .modal-panel p 的默认 margin */
+.modal-panel .log-empty {
+  margin: 0;
+  font-size: 13px;
+  color: #888;
+}
+
+/* 日志条目淡入：只错峰前几条，长列表不眼花 */
+.modal.is-open .log-item {
+  animation: log-item-in 0.25s ease both;
+}
+.modal.is-open .log-item:nth-child(2) { animation-delay: 0.04s; }
+.modal.is-open .log-item:nth-child(3) { animation-delay: 0.08s; }
+.modal.is-open .log-item:nth-child(4) { animation-delay: 0.12s; }
+.modal.is-open .log-item:nth-child(n+5) { animation-delay: 0.16s; }
+
+@keyframes log-item-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.log-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-time {
+  color: #888;
+}
+
+.log-badge {
+  font-weight: 500;
+}
+.log-badge.ok { color: var(--success); }
+.log-badge.fail { color: var(--danger); }
+
+.log-reason {
+  margin-top: 4px;
+  color: #888;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* 减少动态效果偏好：淡入、错峰与按压反馈全部即时完成 */
+@media (prefers-reduced-motion: reduce) {
+  #app,
+  .virtual-models.first-load .virtual-model-section,
+  .spinner,
+  .modal,
+  .modal-panel,
+  .modal.is-open .log-item,
+  .btn-outline,
+  #refresh-btn,
+  #modal-ok {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

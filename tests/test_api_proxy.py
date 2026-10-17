@@ -268,3 +268,78 @@ async def test_api_key_is_enforced():
     )
     assert response.status_code == 200
     assert json.loads(response.text)["choices"][0]["message"]["content"] == "hello"
+
+
+async def test_call_log_records_success():
+    app, manager = build_app(DummyProvider(text="hello"))
+
+    assert chat(TestClient(app)).status_code == 200
+
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1
+    assert logs[0]["success"] is True
+    assert logs[0]["reason"] == ""
+
+
+async def test_call_log_records_failure_reason():
+    app, manager = build_app(DummyProvider(error="Connection timeout"), policy=[[1, 1]])
+
+    assert chat(TestClient(app)).status_code == 503
+
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1
+    assert logs[0]["success"] is False
+    assert "Connection timeout" in logs[0]["reason"]
+
+
+async def test_call_log_records_no_cooldown_failure():
+    # 上游拒绝类失败不冷却，但调用日志仍要留痕
+    provider = DummyProvider(error="内容安全过滤: blocked")
+    app, manager = build_app(provider, policy=[[1, 1]])
+
+    assert chat(TestClient(app)).status_code == 503
+
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1
+    assert logs[0]["success"] is False
+    assert "内容安全过滤" in logs[0]["reason"]
+    assert (await manager.get_status())["cooldown_count"] == 0
+
+
+async def test_call_log_records_empty_response_exhaustion():
+    app, manager = build_app(DummyProvider(text=""), policy=[[1, 1]])
+
+    assert chat(TestClient(app)).status_code == 503
+
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1  # 原地重试只记一条结局
+    assert logs[0]["success"] is False
+    assert "空响应" in logs[0]["reason"]
+
+
+async def test_call_log_records_stream_success():
+    app, manager = build_app(DummyProvider(text="hello"))
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+    assert response.status_code == 200
+    assert "data: [DONE]" in response.text  # 读完整流，确保生成器执行完
+
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1
+    assert logs[0]["success"] is True
+
+
+async def test_call_log_records_stream_failure():
+    provider = DummyProvider(error="Connection reset")
+    app, manager = build_app(provider, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+    assert response.status_code == 200
+    assert "data: [DONE]" in response.text
+
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1
+    assert logs[0]["success"] is False
+    assert "Connection reset" in logs[0]["reason"]

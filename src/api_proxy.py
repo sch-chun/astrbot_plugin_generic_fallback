@@ -238,15 +238,18 @@ def create_proxy_router(
                         else:
 
                             # 达到重试上限，回退但不进入冷却
+                            await model_manager.record_call(provider_id, False, err_msg)
                             return None
                     elif _is_no_cooldown_error(err_msg):
                         logger.warning(f"Provider {provider_id} 请求被上游拒绝，跳过且不进入冷却: {e}")
+                        await model_manager.record_call(provider_id, False, err_msg)
                         return None
                     else:
 
                         # 其他异常直接冷却
                         logger.warning(f"Provider {provider_id} 请求异常: {e}")
                         await model_manager.mark_cooldown(provider_id, err_msg)
+                        await model_manager.record_call(provider_id, False, err_msg)
                         return None
 
                 # 检查空响应
@@ -257,10 +260,14 @@ def create_proxy_router(
                     else:
 
                         # 达到重试上限，回退但不进入冷却
+                        await model_manager.record_call(
+                            provider_id, False, f"连续 {empty_response_max_attempts} 次返回空响应"
+                        )
                         return None
                 else:
                     openai_resp = _llm_response_to_openai_chat_completion(llm_resp, requested_model)
                     await model_manager.mark_success(provider_id)
+                    await model_manager.record_call(provider_id, True)
                     if log_resp:
                         logger.info(f"[响应日志] Provider={provider_id} 非流式响应: {json.dumps(openai_resp, ensure_ascii=False)[:500]}...")
                     return JSONResponse(content=openai_resp, status_code=200)
@@ -367,6 +374,7 @@ def create_proxy_router(
                         # 客户端收完数据可能立刻断连，此时生成器会在 yield 处被关闭、后续代码不再执行，
                         # 因此成功计数必须在 [DONE] 之前清掉
                         await model_manager.mark_success(provider_id)
+                        await model_manager.record_call(provider_id, True)
 
                         # 发送结束标记
                         yield b"data: [DONE]\n\n"
@@ -375,6 +383,7 @@ def create_proxy_router(
                             logger.info(f"[响应日志] Provider={provider_id} 流式响应完成，内容长度 {len(final_resp.completion_text or '')}")
                     except Exception as e:
                         logger.warning(f"Provider {provider_id} 流式请求生成器异常: {e}")
+                        await model_manager.record_call(provider_id, False, str(e))
                         if not _is_no_cooldown_error(str(e)):
                             await model_manager.mark_cooldown(provider_id, str(e))
                         yield b'data: {"error": "provider error"}\n\n'
@@ -393,6 +402,7 @@ def create_proxy_router(
 
             except Exception as e:
                 logger.warning(f"Provider {provider_id} 流式请求异常: {e}")
+                await model_manager.record_call(provider_id, False, str(e))
                 if not _is_no_cooldown_error(str(e)):
                     await model_manager.mark_cooldown(provider_id, str(e))
                 return None
