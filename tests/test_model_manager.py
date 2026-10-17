@@ -5,7 +5,10 @@ import time
 
 import pytest
 
-from astrbot_plugin_generic_fallback.src.model_manager import ModelManager
+from astrbot_plugin_generic_fallback.src.model_manager import (
+    CALL_LOG_MAX_ENTRIES,
+    ModelManager,
+)
 
 PROVIDER = "provider/openai"
 DEFAULT_POLICY = [[1, 1], [2, 5], [5, 30]]
@@ -218,3 +221,51 @@ async def test_lock_is_safe_across_two_event_loops(monkeypatch):
 
     status = await manager.get_status()
     assert status["fail_counts"] == {PROVIDER: 2}
+
+
+async def test_call_log_records_outcomes_newest_first():
+    manager = ModelManager()
+    other = "provider/anthropic"
+
+    await manager.record_call(PROVIDER, True)
+    await manager.record_call(PROVIDER, False, "boom")
+    await manager.record_call(other, False, "other boom")
+
+    logs = await manager.get_call_log(PROVIDER)
+
+    assert len(logs) == 2  # 只返回指定 Provider 的记录
+    assert logs[0]["success"] is False
+    assert logs[0]["reason"] == "boom"
+    assert logs[1]["success"] is True
+    assert logs[1]["reason"] == ""
+    assert all(log["provider_id"] == PROVIDER for log in logs)
+
+
+async def test_call_log_entries_carry_timestamp():
+    manager = ModelManager()
+
+    await manager.record_call(PROVIDER, False, "timeout")
+
+    (entry,) = await manager.get_call_log(PROVIDER)
+    assert entry["time"]  # ISO 时间串，供面板直接展示
+
+
+async def test_call_log_is_capped():
+    manager = ModelManager()
+
+    for index in range(CALL_LOG_MAX_ENTRIES + 20):
+        await manager.record_call(PROVIDER, True, f"call {index}")
+
+    logs = await manager.get_call_log(PROVIDER)
+
+    assert len(logs) == CALL_LOG_MAX_ENTRIES
+    # 最旧的被挤出，最新一条在头部
+    assert logs[0]["reason"] == f"call {CALL_LOG_MAX_ENTRIES + 19}"
+    assert logs[-1]["reason"] == "call 20"
+
+
+async def test_call_log_empty_for_unknown_provider():
+    manager = ModelManager()
+    await manager.record_call(PROVIDER, True)
+
+    assert await manager.get_call_log("provider/ghost") == []

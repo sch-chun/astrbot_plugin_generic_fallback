@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- 监控面板支持查看单个 Provider 的近期调用日志（时间、成败、失败原因）：Provider 卡片新增「日志」按钮，
+  数据经 `GET /generic_fallback/logs?provider_id=...` 读取，内存中最多保留最近 200 条
+
+### Changed
+- 监控面板 Provider 卡片：剩余冷却时间与连续失败次数合并为同一行展示
+
 ### Fixed
 - `ModelManager` 的锁由 `asyncio.Lock` 改为 `threading.Lock`：代理服务跑在独立线程的事件循环里，
   监控面板（AstrBot 主循环）与代理请求（线程循环）会并发操作 `ModelManager`，`asyncio.Lock`

@@ -101,16 +101,24 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
                 <span class="dot ${statusClass}"></span>
                 <span>${statusText}</span>
               </div>
-              <button class="toggle-btn" data-pid="${escapeHtml(pid)}" data-action="${isDisabled ? 'enable' : 'disable'}">
-                ${isDisabled ? '解禁' : '禁用'}
-              </button>
+              <div class="card-actions">
+                <button class="btn-outline toggle-btn" data-pid="${escapeHtml(pid)}" data-action="${isDisabled ? 'enable' : 'disable'}">
+                  ${isDisabled ? '解禁' : '禁用'}
+                </button>
+                <button class="btn-outline log-btn" data-pid="${escapeHtml(pid)}">日志</button>
+              </div>
             </div>`;
 
+        // 剩余冷却时间与连续失败次数合并一行，避免卡片高度参差不齐
+        const metaParts = [];
         if (isCooldown && !isDisabled) {
-          html += `<div class="cooldown-timer">⏱ 剩余 ${remaining} 秒</div>`;
+          metaParts.push('<span class="meta-cooldown">剩余 ' + remaining + ' 秒</span>');
         }
         if (failures > 0) {
-          html += `<div class="fail-count">连续失败 ${failures} 次</div>`;
+          metaParts.push('<span class="meta-fail">连续失败 ' + failures + ' 次</span>');
+        }
+        if (metaParts.length > 0) {
+          html += `<div class="provider-meta">${metaParts.join('<span class="meta-sep">·</span>')}</div>`;
         }
 
         html += `</div>`;
@@ -123,6 +131,9 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
   for (const btn of container.querySelectorAll('.toggle-btn')) {
     btn.addEventListener('click', onToggleClick);
   }
+  for (const btn of container.querySelectorAll('.log-btn')) {
+    btn.addEventListener('click', onLogClick);
+  }
 }
 
 // 插件页在 iframe 沙箱里 alert() 会被拦截，用自建模态框代替
@@ -134,6 +145,55 @@ function showModal(message) {
 
 function closeModal() {
   document.getElementById('modal').hidden = true;
+}
+
+function closeLogModal() {
+  document.getElementById('log-modal').hidden = true;
+}
+
+function formatLogTime(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return String(iso);
+  return date.toLocaleString();
+}
+
+function renderLogModal(providerId, logs) {
+  document.getElementById('log-title').textContent = `调用日志：${providerId}`;
+  const list = document.getElementById('log-list');
+
+  if (!logs || logs.length === 0) {
+    list.innerHTML = '<p class="log-empty">暂无调用记录</p>';
+  } else {
+    let html = '';
+    for (const entry of logs) {
+      const ok = !!entry.success;
+      html += `<div class="log-item">
+        <div class="log-head">
+          <span class="log-time">${escapeHtml(formatLogTime(entry.time))}</span>
+          <span class="log-badge ${ok ? 'ok' : 'fail'}">${ok ? '成功' : '失败'}</span>
+        </div>
+        ${entry.reason ? `<div class="log-reason">${escapeHtml(entry.reason)}</div>` : ''}
+      </div>`;
+    }
+    list.innerHTML = html;
+  }
+  document.getElementById('log-modal').hidden = false;
+}
+
+async function onLogClick(event) {
+  const btn = event.currentTarget;
+  const providerId = btn.dataset.pid;
+
+  btn.disabled = true;
+  try {
+    const data = await bridge.apiGet('logs', { provider_id: providerId });
+    renderLogModal(providerId, (data && data.logs) || []);
+  } catch (err) {
+    console.error('获取调用日志失败:', err);
+    showModal(`获取调用日志失败: ${err && err.message ? err.message : err}`);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function onToggleClick(event) {
@@ -177,8 +237,16 @@ async function init() {
   document.getElementById('modal').addEventListener('click', (event) => {
     if (event.target.id === 'modal') closeModal();
   });
+
+  document.getElementById('log-close').addEventListener('click', closeLogModal);
+  document.getElementById('log-modal').addEventListener('click', (event) => {
+    if (event.target.id === 'log-modal') closeLogModal();
+  });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeModal();
+    if (event.key === 'Escape') {
+      closeModal();
+      closeLogModal();
+    }
   });
 
   // 每30秒自动刷新

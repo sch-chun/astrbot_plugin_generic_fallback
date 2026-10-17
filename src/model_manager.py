@@ -1,4 +1,5 @@
 import threading
+from collections import deque
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -9,6 +10,9 @@ from .config import (
     normalize_cooldown_policy,
     resolve_cooldown_minutes,
 )
+
+# 调用日志环形缓冲容量：仅供人工排查近期调用，够用即可，避免无限增长
+CALL_LOG_MAX_ENTRIES = 200
 
 
 class ModelManager:
@@ -23,6 +27,7 @@ class ModelManager:
         self._cooldown: dict[str, datetime] = {}  # provider_id -> 冷却结束时间
         self._fail_counts: dict[str, int] = {}  # provider_id -> 连续失败次数
         self._disabled: set[str] = set()  # 被手动禁用的 provider_id
+        self._call_log: deque[dict] = deque(maxlen=CALL_LOG_MAX_ENTRIES)  # 近期调用记录
         self._cooldown_policy = normalize_cooldown_policy(
             DEFAULT_COOLDOWN_POLICY if cooldown_policy is None else cooldown_policy
         )
@@ -101,3 +106,34 @@ class ModelManager:
                 "fail_counts": {pid: count for pid, count in self._fail_counts.items() if count > 0},
                 "cooldown_policy": self.cooldown_policy,
             }
+
+    async def record_call(self, provider_id: str, success: bool, reason: str = "") -> None:
+        """记录一次 Provider 调用的结果，供监控面板查看
+
+        Args:
+            provider_id: Provider ID。
+            success: 调用是否成功。
+            reason: 失败原因；成功时留空。
+        """
+        with self._lock:
+            self._call_log.append({
+                "time": datetime.now().isoformat(timespec="seconds"),
+                "provider_id": provider_id,
+                "success": success,
+                "reason": reason,
+            })
+
+    async def get_call_log(self, provider_id: str) -> list[dict]:
+        """读取指定 Provider 的近期调用记录（最新在前）
+
+        Args:
+            provider_id: Provider ID。
+
+        Returns:
+            调用记录列表，元素含 time / success / reason 字段。
+        """
+        with self._lock:
+            return [
+                entry for entry in reversed(self._call_log)
+                if entry["provider_id"] == provider_id
+            ]

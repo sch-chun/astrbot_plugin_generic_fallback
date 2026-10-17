@@ -143,6 +143,12 @@ class GenericFallbackProxyPlugin(Star):
             ["POST"],
             "禁用或解除禁用 Provider"
         )
+        self.context.register_web_api(
+            f"/{self._plugin_name}/logs",
+            self.logs_handler,
+            ["GET"],
+            "获取指定 Provider 的近期调用记录"
+        )
 
         # 6. 创建 FastAPI 应用
         self._fastapi_app = FastAPI(title="Generic Fallback", version="1.0.0")
@@ -185,6 +191,19 @@ class GenericFallbackProxyPlugin(Star):
             for v in self._virtual_models
         ]
         return json_response(status)
+
+    async def logs_handler(self) -> Union[Response, JSONResponse]:
+        """返回指定 Provider 的近期调用记录（时间、成败、失败原因）"""
+        if not self._model_manager:
+            return json_response({"error": "服务未初始化"})
+
+        provider_id = web_request.query.get("provider_id", "")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return json_response({"error": "provider_id 不能为空"})
+        provider_id = provider_id.strip()
+
+        logs = await self._model_manager.get_call_log(provider_id)
+        return json_response({"provider_id": provider_id, "logs": logs})
 
     async def set_provider_disabled_handler(self) -> Union[Response, JSONResponse]:
         """处理监控面板的禁用/解除禁用请求"""

@@ -90,7 +90,7 @@ h1 {
 
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
   margin-top: 10px;
 }
@@ -134,39 +134,55 @@ h1 {
 .dot.cooldown { background: var(--warning); }
 .dot.disabled { background: var(--danger); }
 
-.provider-card .cooldown-timer {
+/* 剩余冷却时间与连续失败次数合并一行 */
+.provider-card .provider-meta {
   margin-top: 6px;
   font-size: 13px;
+  color: #888;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.provider-meta .meta-cooldown {
   color: var(--warning);
 }
-
-.provider-card .fail-count {
-  margin-top: 4px;
-  font-size: 13px;
-  color: #888;
+.provider-meta .meta-sep {
+  color: var(--border);
 }
 
-.toggle-btn {
+/* 卡片右侧操作区：禁用/解禁 + 日志 */
+.card-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 描边按钮：Provider 卡片与日志模态框共用 */
+.btn-outline {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 13px;
-  min-width: 60px;
   flex-shrink: 0;
   text-align: center;
   white-space: nowrap;
   cursor: pointer;
 }
-.toggle-btn:hover {
+.btn-outline:hover {
   border-color: var(--primary);
   color: var(--primary);
 }
-.toggle-btn:disabled {
+.btn-outline:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+/* 「禁用/解禁」两态等宽；「日志」单态可窄一些 */
+.provider-card .toggle-btn { min-width: 60px; }
+.provider-card .log-btn { min-width: 44px; }
 
 #policy-hint {
   margin-top: 6px;
@@ -216,4 +232,66 @@ h1 {
 }
 #modal-ok:hover {
   opacity: 0.85;
+}
+
+/* 调用日志模态框 */
+.log-panel {
+  max-width: 560px;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+#log-title {
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.log-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.log-empty {
+  margin: 0;
+  font-size: 13px;
+  color: #888;
+}
+
+.log-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-time {
+  color: #888;
+}
+
+.log-badge {
+  font-weight: 500;
+}
+.log-badge.ok { color: var(--success); }
+.log-badge.fail { color: var(--danger); }
+
+.log-reason {
+  margin-top: 4px;
+  color: #888;
+  line-height: 1.5;
+  word-break: break-word;
 }
