@@ -162,6 +162,18 @@ h1 {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
+  /* 左信息列 + 右按钮列：两列高度相互独立，卡片高度取较大值，
+     按钮三行不再把元信息挤到卡片底部 */
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+/* 左侧信息列：名称/状态/元信息纵向流式排布 */
+.card-main {
+  flex: 1 1 auto;
+  /* 长 Provider ID 可压缩换行，不撑破卡片 */
+  min-width: 0;
 }
 
 /* 模型名独占一行，避免被右侧按钮挤压换行 */
@@ -171,19 +183,12 @@ h1 {
   word-break: break-word;
 }
 
-.provider-card .status-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 6px;
-}
-
 .provider-card .status {
   font-size: 13px;
   display: flex;
   align-items: center;
   gap: 6px;
+  margin-top: 6px;
 }
 
 .status .dot {
@@ -216,7 +221,7 @@ h1 {
   color: var(--border);
 }
 
-/* 卡片右侧操作区：禁用/解禁、规则、日志纵向一列，避免横向拥挤 */
+/* 卡片右侧操作区：禁用/解禁、规则、日志纵向一列、顶端对齐，与左信息列互不占行 */
 .card-actions {
   display: flex;
   flex-direction: column;
