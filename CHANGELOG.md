@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - 监控面板视觉优化：首次加载占位与错峰淡入、模态框弹出/关闭过渡动画，`prefers-reduced-motion` 下全部降级为瞬时切换
 
 ### Fixed
+- 流式请求支持 Provider 回退：此前流式分支总是直接返回响应，路由的回退循环对流式完全不生效，第一个 Provider 失败后不会尝试下一个。现在 Provider 循环搬进流式生成器，在首个内容字节流出前完成全部回退决策；所有 Provider 均未产出内容时返回 503 JSON（状态码与非流式一致，此前为 200 + SSE 错误 chunk），响应头延迟到首个内容字节发出
 - 流式空响应不再静默按成功处理：此前流式路径只调用一次上游，空流（无任何内容 chunk）会被标记为成功并清零连续失败计数；现在与非流式一致原地重试（默认 3 次），耗尽后记录失败、不进入冷却，以错误 chunk 收尾。`completion has no choices` 异常同样改为原地重试；内容已发出后的异常仍只记录并以错误 chunk 收尾（重试会向客户端重复发送内容）
 - `ModelManager` 的锁由 `asyncio.Lock` 改为 `threading.Lock`：代理服务跑在独立线程的事件循环里，
   监控面板（AstrBot 主循环）与代理请求（线程循环）会并发操作 `ModelManager`，`asyncio.Lock`

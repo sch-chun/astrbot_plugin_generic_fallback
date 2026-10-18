@@ -12,6 +12,7 @@ from astrbot_plugin_generic_fallback.src.config import ProxyConfig
 from astrbot_plugin_generic_fallback.src.model_manager import ModelManager
 
 PROVIDER_ID = "provider/dummy"
+PROVIDER_ID_2 = "provider/dummy2"
 VIRTUAL_MODEL = "vm"
 
 
@@ -76,14 +77,16 @@ class FakeProviderManager:
         return self._providers.get(provider_id)
 
 
-def build_app(provider: DummyProvider, policy=None, api_key: str = ""):
+def build_app(provider, policy=None, api_key: str = ""):
+    """provider 可为单个 DummyProvider，或 {provider_id: DummyProvider} 字典（多 Provider 回退链）"""
+    providers = provider if isinstance(provider, dict) else {PROVIDER_ID: provider}
     manager = ModelManager(cooldown_policy=policy)
     config = ProxyConfig(proxy_api_key=api_key)
     router = create_proxy_router(
         config=config,
         model_manager=manager,
-        virtual_models=[{"name": VIRTUAL_MODEL, "provider_ids": [PROVIDER_ID]}],
-        provider_manager=FakeProviderManager({PROVIDER_ID: provider}),
+        virtual_models=[{"name": VIRTUAL_MODEL, "provider_ids": list(providers)}],
+        provider_manager=FakeProviderManager(providers),
     )
     app = FastAPI()
     app.include_router(router)
@@ -173,8 +176,9 @@ async def test_stream_no_choices_does_not_cooldown():
     app, _ = build_app(provider, policy=[[1, 1]])
     client = TestClient(app)
 
-    assert chat(client, stream=True).status_code == 200
+    response = chat(client, stream=True)
 
+    assert response.status_code == 503  # 唯一 Provider 重试耗尽，与非流式一致
     assert provider.calls == 3  # 等于 empty_response_max_attempts 默认值
     status = client.get("/v1/status").json()
     assert status["cooldown_count"] == 0
@@ -188,11 +192,9 @@ async def test_stream_empty_response_retries_in_place():
     client = TestClient(app)
 
     response = chat(client, stream=True)
-    assert response.status_code == 200
+    assert response.status_code == 503  # 唯一 Provider 重试耗尽，无内容流出
 
     assert provider.calls == 3  # 原地重试满 empty_response_max_attempts
-    assert 'data: {"error": "empty stream response"}' in response.text
-    assert "data: [DONE]" in response.text
     status = client.get("/v1/status").json()
     assert status["cooldown_count"] == 0
     assert status["fail_counts"] == {}  # 空响应不计入连续失败
@@ -210,8 +212,8 @@ async def test_stream_empty_final_response_retries_in_place():
 
     response = chat(client, stream=True)
 
+    assert response.status_code == 503
     assert provider.calls == 3
-    assert 'data: {"error": "empty stream response"}' in response.text
     assert client.get("/v1/status").json()["cooldown_count"] == 0
 
 
@@ -253,7 +255,8 @@ async def test_stream_unsupported_media_type_does_not_cooldown():
     client = TestClient(app)
 
     response = chat(client, stream=True)
-    assert response.status_code == 200
+    assert response.status_code == 503
+    assert provider.calls == 1  # 明确拒绝，不原地重试
     assert client.get("/v1/status").json()["cooldown_count"] == 0
 
 
@@ -312,7 +315,7 @@ async def test_stream_success_resets_fail_count():
     client = TestClient(app)
 
     provider.error = "boom"
-    assert chat(client, stream=True).status_code == 200  # 流式请求总是先返回响应头
+    assert chat(client, stream=True).status_code == 503  # 内容未发出即失败，不回退出内容
     assert client.get("/v1/status").json()["fail_counts"] == {PROVIDER_ID: 1}
 
     provider.error = None
@@ -421,10 +424,102 @@ async def test_call_log_records_stream_failure():
     client = TestClient(app)
 
     response = chat(client, stream=True)
-    assert response.status_code == 200
-    assert "data: [DONE]" in response.text
+    assert response.status_code == 503  # 内容未发出即失败，无 SSE 输出
 
     logs = await manager.get_call_log(PROVIDER_ID)
     assert len(logs) == 1
     assert logs[0]["success"] is False
     assert "Connection reset" in logs[0]["reason"]
+
+
+async def test_stream_falls_back_after_empty_exhaustion():
+    # P1 空流重试耗尽后应回退到 P2，而不是把空流当成功或直接失败
+    p1 = DummyProvider(stream_empty=True)
+    p2 = DummyProvider(text="hello")
+    app, manager = build_app({PROVIDER_ID: p1, PROVIDER_ID_2: p2}, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+
+    assert response.status_code == 200
+    assert p1.calls == 3  # 原地重试满
+    assert p2.calls == 1
+    assert "data: [DONE]" in response.text
+    assert "error" not in response.text
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1
+    assert logs[0]["success"] is False
+    assert "空响应" in logs[0]["reason"]
+
+
+async def test_stream_falls_back_after_pre_content_error():
+    # 内容未发出时的普通异常：冷却并回退到下一个 Provider
+    p1 = DummyProvider(error="Connection timeout")
+    p2 = DummyProvider(text="hello")
+    app, _ = build_app({PROVIDER_ID: p1, PROVIDER_ID_2: p2}, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+
+    assert response.status_code == 200
+    assert p1.calls == 1  # 普通异常不原地重试
+    assert p2.calls == 1
+    assert "data: [DONE]" in response.text
+    status = client.get("/v1/status").json()
+    assert status["fail_counts"] == {PROVIDER_ID: 1}
+    assert status["cooldown_count"] == 1
+
+
+async def test_stream_no_fallback_after_content_sent():
+    # 内容已发出后失败：不可回退（重试会重复发送内容），P2 不应被调用
+    p1 = DummyProvider(stream_error_after_content=True)
+    p2 = DummyProvider(text="hello")
+    app, _ = build_app({PROVIDER_ID: p1, PROVIDER_ID_2: p2}, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+
+    assert response.status_code == 200
+    assert p1.calls == 1
+    assert p2.calls == 0
+    assert 'data: {"error": "provider error"}' in response.text
+    assert "data: [DONE]" in response.text
+
+
+async def test_stream_all_providers_unavailable_returns_503():
+    # 所有 Provider 都用不了：与非流式一致返回 503 JSON，而非 200 + SSE 错误 chunk
+    p1 = DummyProvider(error="boom")
+    app, _ = build_app(p1, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "all_providers_unavailable"
+    assert "data:" not in response.text
+
+
+async def test_stream_all_cooling_returns_503():
+    # 唯一 Provider 冷却中：直接 503，不重复调用上游
+    p1 = DummyProvider(text="hello")
+    app, _ = build_app(p1, policy=[[1, 1]])
+    client = TestClient(app)
+
+    p1.error = "boom"
+    assert chat(client, stream=True).status_code == 503  # 第一次：失败并进入冷却
+
+    p1.error = None
+    response = chat(client, stream=True)
+    assert response.status_code == 503  # 冷却中
+    assert p1.calls == 1
+
+
+async def test_stream_disabled_provider_returns_503():
+    p1 = DummyProvider(text="hello")
+    app, manager = build_app(p1)
+    await manager.set_disabled(PROVIDER_ID, True)
+
+    response = chat(TestClient(app), stream=True)
+
+    assert response.status_code == 503
+    assert p1.calls == 0
