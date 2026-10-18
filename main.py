@@ -29,6 +29,9 @@ from .src.config import DEFAULT_COOLDOWN_POLICY, ProxyConfig, normalize_cooldown
 from .src.model_manager import ModelManager
 from .src.api_proxy import create_proxy_router
 
+# 自定义规则在插件 KV 中的存储键
+RULES_KV_KEY = "custom_rules"
+
 
 class GenericFallbackProxyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
@@ -130,6 +133,14 @@ class GenericFallbackProxyPlugin(Star):
         # 4. 初始化模型管理器
         self._model_manager = ModelManager(cooldown_policy=cooldown_policy)
 
+        # 4.5 从 KV 加载持久化的自定义规则（读取失败不影响代理启动，仅丢失规则）
+        try:
+            stored_rules = await self.get_kv_data(RULES_KV_KEY, {})
+        except Exception as e:
+            logger.warning(f"读取自定义规则失败，本次将以空规则启动: {e}")
+            stored_rules = {}
+        await self._model_manager.set_rules_map(stored_rules)
+
         # 5. 注册 Web API
         self.context.register_web_api(
             f"/{self._plugin_name}/status",
@@ -142,6 +153,12 @@ class GenericFallbackProxyPlugin(Star):
             self.set_provider_disabled_handler,
             ["POST"],
             "禁用或解除禁用 Provider"
+        )
+        self.context.register_web_api(
+            f"/{self._plugin_name}/rules/set",
+            self.set_rules_handler,
+            ["POST"],
+            "设置指定 Provider 的自定义规则"
         )
         self.context.register_web_api(
             f"/{self._plugin_name}/logs",
@@ -190,6 +207,7 @@ class GenericFallbackProxyPlugin(Star):
             }
             for v in self._virtual_models
         ]
+        status["custom_rules"] = await self._model_manager.get_all_rules()
         return json_response(status)
 
     async def logs_handler(self) -> Union[Response, JSONResponse]:
@@ -228,6 +246,39 @@ class GenericFallbackProxyPlugin(Star):
 
         await self._model_manager.set_disabled(provider_id, disabled)
         return json_response({"ok": True, "provider_id": provider_id, "disabled": disabled})
+
+    async def set_rules_handler(self) -> Response | JSONResponse:
+        """处理监控面板的自定义规则保存请求（整体替换指定 Provider 的规则）"""
+        if not self._model_manager:
+            return json_response({"ok": False, "error": "服务未初始化"})
+
+        payload = await self._read_json_body()
+        provider_id = payload.get("provider_id")
+        rules = payload.get("rules")
+
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return json_response({"ok": False, "error": "provider_id 不能为空"})
+        provider_id = provider_id.strip()
+
+        # 只允许操作回退链里真实存在的 Provider，避免脏 id 攒进规则表
+        known_ids = {pid for v in self._virtual_models for pid in v.get("provider_ids", [])}
+        if provider_id not in known_ids:
+            return json_response({"ok": False, "error": f"provider_id '{provider_id}' 不在任何虚拟模型的回退链中"})
+
+        try:
+            saved = await self._model_manager.set_rules(provider_id, rules)
+        except ValueError as e:
+            return json_response({"ok": False, "error": str(e)})
+
+        await self._persist_rules()
+        return json_response({"ok": True, "provider_id": provider_id, "rules": saved})
+
+    async def _persist_rules(self) -> None:
+        """把当前规则写入 KV（持久化失败只告警，不影响已生效的内存状态）"""
+        try:
+            await self.put_kv_data(RULES_KV_KEY, await self._model_manager.export_rules())
+        except Exception as e:
+            logger.warning(f"自定义规则持久化失败，重启后将丢失本次修改: {e}")
 
     async def _read_json_body(self) -> dict:
         """读取插件 Web API 的请求体并解析为 dict"""
