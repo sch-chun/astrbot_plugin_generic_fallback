@@ -1,13 +1,16 @@
-"""ModelManager 的冷却阶梯、成功清零与手动禁用测试。"""
+"""ModelManager 的冷却阶梯、成功清零、手动禁用与自定义规则测试。"""
 import asyncio
 import threading
 import time
+from datetime import date, datetime
+from datetime import time as clock_time
 
 import pytest
 
 from astrbot_plugin_generic_fallback.src.model_manager import (
     CALL_LOG_MAX_ENTRIES,
     ModelManager,
+    validate_rules,
 )
 
 PROVIDER = "provider/openai"
@@ -269,3 +272,189 @@ async def test_call_log_empty_for_unknown_provider():
     await manager.record_call(PROVIDER, True)
 
     assert await manager.get_call_log("provider/ghost") == []
+
+
+# ---------- 自定义规则 ----------
+
+RULE_429 = {"pattern": "429", "threshold": 2, "action": "cooldown", "cooldown_minutes": 7}
+
+
+async def rules_map(manager: ModelManager, provider_id: str = PROVIDER) -> dict:
+    rules = (await manager.get_all_rules()).get(provider_id, [])
+    return {rule["pattern"]: rule for rule in rules}
+
+
+async def test_validate_rules_normalizes_and_generates_ids():
+    rules = validate_rules([
+        {"pattern": "  429  ", "threshold": 2, "action": "cooldown", "cooldown_minutes": 7},
+        {"pattern": "quota", "threshold": 1, "action": "disable", "unknown_key": "ignored"},
+    ])
+    assert [rule["pattern"] for rule in rules] == ["429", "quota"]
+    assert all(rule["id"].startswith("r-") and len(rule["id"]) == 10 for rule in rules)
+    assert rules[0]["cooldown_minutes"] == 7
+    assert rules[1]["action"] == "disable"
+    assert "unknown_key" not in rules[1]  # 未知键忽略，不透传不存储
+
+
+async def test_validate_rules_defaults_cooldown_minutes():
+    (rule,) = validate_rules([{"pattern": "429", "threshold": 1, "action": "cooldown"}])
+    assert rule["cooldown_minutes"] == 10
+
+
+async def test_validate_rules_rejects_invalid_rules():
+    invalid = [
+        "not-a-list",
+        {"pattern": "", "threshold": 1, "action": "disable"},
+        {"pattern": "   ", "threshold": 1, "action": "disable"},
+        {"pattern": "x", "threshold": 0, "action": "disable"},
+        {"pattern": "x", "threshold": True, "action": "disable"},  # bool 是 int 子类，须排除
+        {"pattern": "x", "threshold": 1.5, "action": "disable"},
+        {"pattern": "x", "threshold": 1, "action": "explode"},
+        {"pattern": "x", "threshold": 1, "action": "cooldown", "cooldown_minutes": 0},
+        {"pattern": "x", "threshold": 1, "action": "cooldown", "cooldown_minutes": -1},
+        {"pattern": "x", "threshold": 1, "action": "cooldown", "cooldown_minutes": "5"},
+        {"pattern": "x" * 101, "threshold": 1, "action": "disable"},
+        ["not", "a", "dict"],
+    ]
+    for rules in invalid:
+        with pytest.raises(ValueError):
+            validate_rules(rules)
+
+
+async def test_apply_rules_counts_consecutive_hits_and_fires_cooldown():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [RULE_429])
+
+    assert await manager.apply_rules(PROVIDER, "Error code: 429 rate limited") is False
+    assert await manager.apply_rules(PROVIDER, "Error code: 429 rate limited") is True
+
+    status = await manager.get_status()
+    assert status["cooldown_count"] == 1
+    assert 415 <= status["cooldown_list"][0]["remaining_secs"] <= 420  # 规则指定 7 分钟
+    assert status["fail_counts"] == {}  # 规则触发，不计入内置阶梯
+    assert (await rules_map(manager))["429"]["hits"] == 0  # 触发后归零
+
+
+async def test_apply_rules_matches_case_insensitively():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [{"pattern": "Quota", "threshold": 1, "action": "disable"}])
+
+    assert await manager.apply_rules(PROVIDER, "EXCEEDED QUOTA") is True
+    assert await manager.is_disabled(PROVIDER) is True
+
+
+async def test_apply_rules_non_match_resets_only_that_rule():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [
+        {"pattern": "429", "threshold": 3, "action": "disable"},
+        {"pattern": "timeout", "threshold": 3, "action": "disable"},
+    ])
+
+    await manager.apply_rules(PROVIDER, "429")
+    await manager.apply_rules(PROVIDER, "429")
+    await manager.apply_rules(PROVIDER, "timeout")  # 未命中 429，其计数应被清零
+
+    rules = await rules_map(manager)
+    assert rules["429"]["hits"] == 0
+    assert rules["timeout"]["hits"] == 1
+
+
+async def test_apply_rules_until_midnight():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [{"pattern": "timeout", "threshold": 1, "action": "until_midnight"}])
+
+    assert await manager.apply_rules(PROVIDER, "connection timeout") is True
+
+    (item,) = (await manager.get_status())["cooldown_list"]
+    until = datetime.fromisoformat(item["cooldown_until"])
+    assert until.time() == clock_time(0, 0)  # 次日 00:00
+    assert until.date() > date.today()
+
+
+async def test_apply_rules_without_rules_is_noop():
+    manager = ModelManager()
+    assert await manager.apply_rules(PROVIDER, "boom") is False
+    assert (await manager.get_status())["cooldown_count"] == 0
+
+
+async def test_success_resets_rule_hits():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [RULE_429])
+    await manager.apply_rules(PROVIDER, "429")
+
+    await manager.mark_success(PROVIDER)
+
+    assert (await rules_map(manager))["429"]["hits"] == 0
+    # 计数已清零：再命中一次不会触发（阈值 2）
+    assert await manager.apply_rules(PROVIDER, "429") is False
+
+
+async def test_enable_resets_rule_hits():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [RULE_429])
+    await manager.apply_rules(PROVIDER, "429")  # hits = 1
+
+    await manager.set_disabled(PROVIDER, True)
+    await manager.set_disabled(PROVIDER, False)
+
+    assert await manager.apply_rules(PROVIDER, "429") is False
+
+
+async def test_clear_all_resets_rule_hits():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [RULE_429])
+    await manager.apply_rules(PROVIDER, "429")
+
+    await manager.clear_all()
+
+    assert await manager.apply_rules(PROVIDER, "429") is False
+
+
+async def test_set_rules_replaces_and_prunes_stale_hits():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [RULE_429])
+    await manager.apply_rules(PROVIDER, "429")
+
+    # 换成全新规则：旧规则的残留计数不应泄漏
+    replaced = await manager.set_rules(PROVIDER, [{"pattern": "boom", "threshold": 2, "action": "disable"}])
+    assert len(replaced) == 1
+    assert replaced[0]["pattern"] == "boom"
+    assert replaced[0]["hits"] == 0
+
+    # 保留 id 的规则沿用已有计数（replaced[0] 带 hits 字段，服务端会忽略该键）
+    await manager.apply_rules(PROVIDER, "boom")
+    kept = await manager.set_rules(PROVIDER, [replaced[0]])
+    assert kept[0]["hits"] == 1
+
+    # 空列表 = 清空
+    assert await manager.set_rules(PROVIDER, []) == []
+    assert await manager.get_all_rules() == {}
+
+
+async def test_set_rules_map_skips_only_invalid_entries():
+    manager = ModelManager()
+    await manager.set_rules_map({
+        PROVIDER: [RULE_429, {"pattern": ""}],  # 第二条非法，只丢它
+        "provider/ghost": "not-a-list",
+        42: [],  # key 非字符串
+    })
+
+    rules = await manager.get_all_rules()
+    assert list(rules) == [PROVIDER]
+    assert len(rules[PROVIDER]) == 1
+
+
+async def test_set_rules_map_rejects_non_dict():
+    manager = ModelManager()
+    await manager.set_rules_map("nope")
+    assert await manager.get_all_rules() == {}
+
+
+async def test_export_rules_excludes_hits():
+    manager = ModelManager()
+    await manager.set_rules(PROVIDER, [RULE_429])
+    await manager.apply_rules(PROVIDER, "429")
+
+    exported = await manager.export_rules()
+    assert "hits" not in exported[PROVIDER][0]
+    assert exported[PROVIDER][0]["pattern"] == "429"
