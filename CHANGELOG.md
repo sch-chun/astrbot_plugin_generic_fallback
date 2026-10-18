@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - 监控面板视觉优化：首次加载占位与错峰淡入、模态框弹出/关闭过渡动画，`prefers-reduced-motion` 下全部降级为瞬时切换
 
 ### Fixed
+- 流式空响应不再静默按成功处理：此前流式路径只调用一次上游，空流（无任何内容 chunk）会被标记为成功并清零连续失败计数；现在与非流式一致原地重试（默认 3 次），耗尽后记录失败、不进入冷却，以错误 chunk 收尾。`completion has no choices` 异常同样改为原地重试；内容已发出后的异常仍只记录并以错误 chunk 收尾（重试会向客户端重复发送内容）
 - `ModelManager` 的锁由 `asyncio.Lock` 改为 `threading.Lock`：代理服务跑在独立线程的事件循环里，
   监控面板（AstrBot 主循环）与代理请求（线程循环）会并发操作 `ModelManager`，`asyncio.Lock`
   会绑定到首个进入慢路径的事件循环，另一循环再竞争即抛跨循环 `RuntimeError`，或因跨线程唤醒

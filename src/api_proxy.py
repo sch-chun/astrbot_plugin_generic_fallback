@@ -70,7 +70,8 @@ def create_proxy_router(
         """判断异常是否属于「上游拒绝/无有效内容」——这类错误重试无意义，只回退不冷却
 
         覆盖三类：内容安全过滤、415 Unsupported Media Type、completion has no choices。
-        （非流式下 no choices 会先走空响应重试，耗尽后同样是「回退不冷却」，与此处一致。）
+        （no choices 属于「上游无有效内容」，会先走空响应重试，耗尽后同样是「回退不冷却」，
+        流式与非流式一致；内容安全过滤与 415 是明确拒绝，不重试、只回退。）
         """
         lowered = err_msg.lower()
         return (
@@ -276,34 +277,39 @@ def create_proxy_router(
             # 流式
             try:
                 async def stream_generator() -> AsyncGenerator[bytes, None]:
-                    try:
-                        id = f"chatcmpl-{int(time.time())}"
+                    id = f"chatcmpl-{int(time.time())}"
+                    for attempt in range(1, empty_response_max_attempts + 1):
+                        content_sent = False
                         final_resp = None
-                        usage_sent = False
+                        try:
+                            async for llm_chunk in provider.text_chat_stream(
+                                prompt=None,
+                                contexts=contexts,
+                                system_prompt=system_prompt,
+                                func_tool=func_tool,
+                                tool_choice=tool_choice,
+                                request_max_retries=1,
+                                **extra_kwargs,
+                            ):
+                                if llm_chunk.is_chunk:
 
-                        async for llm_chunk in provider.text_chat_stream(
-                            prompt=None,
-                            contexts=contexts,
-                            system_prompt=system_prompt,
-                            func_tool=func_tool,
-                            tool_choice=tool_choice,
-                            request_max_retries=1,
-                            **extra_kwargs,
-                        ):
-                            if llm_chunk.is_chunk:
-                                
-                                # 增量 chunk —— 发送内容增量
-                                chunk_dict = await _llm_response_to_openai_stream(
-                                    llm_chunk, requested_model, id, is_final=False
-                                )
-                                yield f"data: {json.dumps(chunk_dict, ensure_ascii=False)}\n\n".encode("utf-8")
-                            else:
+                                    # 增量 chunk —— 发送内容增量
+                                    chunk_dict = await _llm_response_to_openai_stream(
+                                        llm_chunk, requested_model, id, is_final=False
+                                    )
+                                    yield f"data: {json.dumps(chunk_dict, ensure_ascii=False)}\n\n".encode("utf-8")
+                                    content_sent = True
+                                else:
 
-                                # 最终响应 —— 只提取 usage，不发送内容
-                                final_resp = llm_chunk
+                                    # 最终响应 —— 暂存，待确认不是空流后再发送终止 chunk
+                                    final_resp = llm_chunk
+
+                            # 响应头一旦发出就无法重试或切换 Provider，因此空流判定与终止 chunk
+                            # 的发送都必须赶在任何字节流出之前完成
+                            if content_sent or (final_resp and final_resp.tools_call_args):
 
                                 # 如果包含工具调用，需要以流式 chunk 形式发送
-                                if final_resp.tools_call_args:
+                                if final_resp and final_resp.tools_call_args:
 
                                     # 构建 tool_calls 列表
                                     tool_calls: list[dict] = []
@@ -343,9 +349,9 @@ def create_proxy_router(
                                     if tool_chunk.get("usage") is None:
                                         del tool_chunk["usage"]
                                     yield f"data: {json.dumps(tool_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
-                                
-                                # 如果存在 usage 且尚未发送，则单独发送一个 usage chunk
-                                elif final_resp.usage and not usage_sent:
+
+                                # 如果存在 usage，则单独发送一个 usage chunk
+                                elif final_resp and final_resp.usage:
                                     usage_chunk = {
                                         "id": id,
                                         "object": "chat.completion.chunk",
@@ -369,26 +375,61 @@ def create_proxy_router(
                                     if usage_chunk.get("usage") is None:
                                         del usage_chunk["usage"]
                                     yield f"data: {json.dumps(usage_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
-                                    usage_sent = True
 
-                        # 客户端收完数据可能立刻断连，此时生成器会在 yield 处被关闭、后续代码不再执行，
-                        # 因此成功计数必须在 [DONE] 之前清掉
-                        await model_manager.mark_success(provider_id)
-                        await model_manager.record_call(provider_id, True)
+                                # 客户端收完数据可能立刻断连，此时生成器会在 yield 处被关闭、后续代码不再执行，
+                                # 因此成功计数必须在 [DONE] 之前清掉
+                                await model_manager.mark_success(provider_id)
+                                await model_manager.record_call(provider_id, True)
 
-                        # 发送结束标记
-                        yield b"data: [DONE]\n\n"
+                                # 发送结束标记
+                                yield b"data: [DONE]\n\n"
 
-                        if log_resp and final_resp:
-                            logger.info(f"[响应日志] Provider={provider_id} 流式响应完成，内容长度 {len(final_resp.completion_text or '')}")
-                    except Exception as e:
-                        logger.warning(f"Provider {provider_id} 流式请求生成器异常: {e}")
-                        await model_manager.record_call(provider_id, False, str(e))
-                        if not _is_no_cooldown_error(str(e)):
-                            await model_manager.mark_cooldown(provider_id, str(e))
-                        yield b'data: {"error": "provider error"}\n\n'
-                        yield b"data: [DONE]\n\n"
-                        return
+                                if log_resp and final_resp:
+                                    logger.info(f"[响应日志] Provider={provider_id} 流式响应完成，内容长度 {len(final_resp.completion_text or '')}")
+                                return
+
+                            # 空流：与非流式一致原地重试；耗尽后记录失败（不冷却）并以错误 chunk 收尾
+                            logger.warning(f"Provider {provider_id} 流式返回空响应 (尝试 {attempt}/{empty_response_max_attempts})")
+                            if attempt < empty_response_max_attempts:
+                                continue
+                            await model_manager.record_call(
+                                provider_id, False, f"连续 {empty_response_max_attempts} 次流式返回空响应"
+                            )
+                            yield b'data: {"error": "empty stream response"}\n\n'
+                            yield b"data: [DONE]\n\n"
+                            return
+                        except Exception as e:
+                            err_msg = str(e)
+                            if content_sent:
+
+                                # 内容已发出，重试会向客户端重复发送内容，只能以错误 chunk 收尾
+                                logger.warning(f"Provider {provider_id} 流式请求异常（内容已发出，无法重试）: {e}")
+                                await model_manager.record_call(provider_id, False, err_msg)
+                                if not _is_no_cooldown_error(err_msg):
+                                    await model_manager.mark_cooldown(provider_id, err_msg)
+                                yield b'data: {"error": "provider error"}\n\n'
+                                yield b"data: [DONE]\n\n"
+                                return
+
+                            # 尚未发出任何内容：completion has no choices 与非流式一致原地重试，
+                            # 耗尽后只记录不冷却；其余异常冷却后结束
+                            # （流式响应头已发出，无法像非流式那样回退到下一个 Provider）
+                            if "completion has no choices" in err_msg:
+                                logger.warning(f"Provider {provider_id} 流式请求异常 (尝试 {attempt}/{empty_response_max_attempts}): {e}")
+                                if attempt < empty_response_max_attempts:
+                                    continue
+                                await model_manager.record_call(provider_id, False, err_msg)
+                                yield b'data: {"error": "provider error"}\n\n'
+                                yield b"data: [DONE]\n\n"
+                                return
+
+                            logger.warning(f"Provider {provider_id} 流式请求异常: {e}")
+                            await model_manager.record_call(provider_id, False, err_msg)
+                            if not _is_no_cooldown_error(err_msg):
+                                await model_manager.mark_cooldown(provider_id, err_msg)
+                            yield b'data: {"error": "provider error"}\n\n'
+                            yield b"data: [DONE]\n\n"
+                            return
 
                 return StreamingResponse(
                     stream_generator(),
