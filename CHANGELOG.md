@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.0.8] - 2026-10-18
 
 ### Added
 - 监控面板支持为每个 Provider 配置可选的自定义规则：失败原因包含指定匹配内容（不区分大小写）并连续命中设定次数时，触发「冷却指定分钟 / 冷却到第二天 00:00 / 禁用」三种动作之一；规则命中时跳过内置冷却阶梯。规则与实时命中数（x/N）在卡片徽章与规则模态框中展示，达到阈值的规则高亮提示；规则保存在插件 KV 中，重启后自动恢复，单条规则非法只丢弃该条。新增 `POST /generic_fallback/rules/set` 接口，`status` 接口新增 `custom_rules` 字段
@@ -10,9 +10,9 @@ All notable changes to this project will be documented in this file.
   数据经 `GET /generic_fallback/logs?provider_id=...` 读取，内存中最多保留最近 200 条
 
 ### Changed
-- 监控面板 Provider 卡片：剩余冷却时间与连续失败次数合并为同一行展示
+- 监控面板 Provider 卡片：剩余冷却时间与连续失败次数合并为同一行展示；配置了自定义规则的 Provider 显示「N 条自定义规则」徽章
 - 启动时端口被占用的提示补充可能原因与排查命令（刚重载过插件时，疑似上次尚未返回的模型调用仍阻塞旧代理线程持有端口）
-- 监控面板视觉优化：首次加载占位与错峰淡入、模态框弹出/关闭过渡动画，`prefers-reduced-motion` 下全部降级为瞬时切换
+- 监控面板视觉优化：首次加载占位与错峰淡入、模态框弹出/关闭过渡动画，`prefers-reduced-motion` 下全部降级为瞬时切换；Provider 卡片改为左信息列 + 右按钮列双列布局（长 Provider ID 自动换行不撑破卡片），操作按钮按语义分色（禁用红 / 解禁绿 / 规则蓝 / 日志灰）
 
 ### Fixed
 - 流式请求支持 Provider 回退：此前流式分支总是直接返回响应，路由的回退循环对流式完全不生效，第一个 Provider 失败后不会尝试下一个。现在 Provider 循环搬进流式生成器，在首个内容字节流出前完成全部回退决策；所有 Provider 均未产出内容时返回 503 JSON（状态码与非流式一致，此前为 200 + SSE 错误 chunk），响应头延迟到首个内容字节发出
