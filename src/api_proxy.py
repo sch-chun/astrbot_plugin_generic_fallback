@@ -304,18 +304,23 @@ def create_proxy_router(
                         continue
                     else:
 
-                        # 达到重试上限，回退但不进入冷却
+                        # 达到重试上限，回退但不进入冷却（自定义规则仍可附加动作）
+                        await model_manager.apply_rules(provider_id, err_msg)
                         await model_manager.record_call(provider_id, False, err_msg)
                         return None
                 elif _is_no_cooldown_error(err_msg):
                     logger.warning(f"Provider {provider_id} 请求被上游拒绝，跳过且不进入冷却: {e}")
+                    await model_manager.apply_rules(provider_id, err_msg)
                     await model_manager.record_call(provider_id, False, err_msg)
                     return None
                 else:
 
-                    # 其他异常直接冷却
+                    # 其他异常：自定义规则命中时执行规则动作并跳过内置冷却阶梯，
+                    # 未命中才按阶梯冷却
                     logger.warning(f"Provider {provider_id} 请求异常: {e}")
-                    await model_manager.mark_cooldown(provider_id, err_msg)
+                    rule_fired = await model_manager.apply_rules(provider_id, err_msg)
+                    if not rule_fired:
+                        await model_manager.mark_cooldown(provider_id, err_msg)
                     await model_manager.record_call(provider_id, False, err_msg)
                     return None
 
@@ -326,7 +331,10 @@ def create_proxy_router(
                     continue
                 else:
 
-                    # 达到重试上限，回退但不进入冷却
+                    # 达到重试上限，回退但不进入冷却（自定义规则仍可附加动作）
+                    await model_manager.apply_rules(
+                        provider_id, f"连续 {empty_response_max_attempts} 次返回空响应"
+                    )
                     await model_manager.record_call(
                         provider_id, False, f"连续 {empty_response_max_attempts} 次返回空响应"
                     )
@@ -496,6 +504,9 @@ def create_proxy_router(
                         logger.warning(f"Provider {pid} 流式返回空响应 (尝试 {attempt}/{empty_response_max_attempts})")
                         if attempt < empty_response_max_attempts:
                             continue
+                        await model_manager.apply_rules(
+                            pid, f"连续 {empty_response_max_attempts} 次流式返回空响应"
+                        )
                         await model_manager.record_call(
                             pid, False, f"连续 {empty_response_max_attempts} 次流式返回空响应"
                         )
@@ -506,8 +517,9 @@ def create_proxy_router(
 
                             # 内容已发出，重试会向客户端重复发送内容，也无法切换 Provider
                             logger.warning(f"Provider {pid} 流式请求异常（内容已发出，无法重试）: {e}")
+                            rule_fired = await model_manager.apply_rules(pid, err_msg)
                             await model_manager.record_call(pid, False, err_msg)
-                            if not _is_no_cooldown_error(err_msg):
+                            if not rule_fired and not _is_no_cooldown_error(err_msg):
                                 await model_manager.mark_cooldown(pid, err_msg)
                             yield b'data: {"error": "provider error"}\n\n'
                             yield b"data: [DONE]\n\n"
@@ -519,12 +531,14 @@ def create_proxy_router(
                             logger.warning(f"Provider {pid} 流式请求异常 (尝试 {attempt}/{empty_response_max_attempts}): {e}")
                             if attempt < empty_response_max_attempts:
                                 continue
+                            await model_manager.apply_rules(pid, err_msg)
                             await model_manager.record_call(pid, False, err_msg)
                             break
 
                         logger.warning(f"Provider {pid} 流式请求异常: {e}")
+                        rule_fired = await model_manager.apply_rules(pid, err_msg)
                         await model_manager.record_call(pid, False, err_msg)
-                        if not _is_no_cooldown_error(err_msg):
+                        if not rule_fired and not _is_no_cooldown_error(err_msg):
                             await model_manager.mark_cooldown(pid, err_msg)
                         break
 
