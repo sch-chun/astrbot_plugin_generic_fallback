@@ -523,3 +523,90 @@ async def test_stream_disabled_provider_returns_503():
 
     assert response.status_code == 503
     assert p1.calls == 0
+
+
+# ---------- 自定义规则 ----------
+
+ERROR_429 = "Error code: 429 - rate limited"
+
+
+async def test_custom_rule_cooldown_overrides_builtin_ladder():
+    # 规则命中时执行规则动作并跳过内置阶梯：冷却 7 分钟而非首档 1 分钟，且不计连续失败
+    provider = DummyProvider(error=ERROR_429)
+    app, manager = build_app(provider, policy=[[1, 1]])
+    await manager.set_rules(PROVIDER_ID, [
+        {"pattern": "429", "threshold": 1, "action": "cooldown", "cooldown_minutes": 7},
+    ])
+    client = TestClient(app)
+
+    assert chat(client).status_code == 503
+
+    status = client.get("/v1/status").json()
+    assert status["cooldown_count"] == 1
+    assert 415 <= status["cooldown_list"][0]["remaining_secs"] <= 420
+    assert status["fail_counts"] == {}
+
+
+async def test_custom_rule_disable_on_failure():
+    provider = DummyProvider(error=ERROR_429)
+    app, manager = build_app(provider, policy=[[1, 1]])
+    await manager.set_rules(PROVIDER_ID, [{"pattern": "429", "threshold": 1, "action": "disable"}])
+    client = TestClient(app)
+
+    assert chat(client).status_code == 503
+
+    assert await manager.is_disabled(PROVIDER_ID) is True
+    status = client.get("/v1/status").json()
+    assert status["disabled_list"] == [PROVIDER_ID]
+    assert status["cooldown_count"] == 0  # 规则禁用了，不走内置冷却
+
+
+async def test_custom_rule_hits_accumulate_until_threshold():
+    # 阈值 2：第一次失败只计数不触发（照走内置阶梯），第二次才触发规则
+    provider = DummyProvider(error=ERROR_429)
+    app, manager = build_app(provider, policy=[[1, 0]])  # 0 分钟：冷却立即过期，便于连续两次调用
+    await manager.set_rules(PROVIDER_ID, [
+        {"pattern": "429", "threshold": 2, "action": "cooldown", "cooldown_minutes": 7},
+    ])
+    client = TestClient(app)
+
+    assert chat(client).status_code == 503
+    assert (await manager.get_all_rules())[PROVIDER_ID][0]["hits"] == 1
+    assert await manager.is_available(PROVIDER_ID) is True  # 首档冷却已过期
+
+    assert chat(client).status_code == 503
+    assert await manager.is_available(PROVIDER_ID) is False  # 规则触发：冷却 7 分钟
+    status = client.get("/v1/status").json()
+    assert 415 <= status["cooldown_list"][0]["remaining_secs"] <= 420
+    assert status["fail_counts"] == {PROVIDER_ID: 1}  # 第二次触发规则跳过阶梯，第一次照旧计入
+
+
+async def test_custom_rule_ignores_unrelated_errors():
+    # 规则只匹配指定片段，无关错误照走内置阶梯
+    provider = DummyProvider(error="Connection timeout")
+    app, manager = build_app(provider, policy=[[1, 1]])
+    await manager.set_rules(PROVIDER_ID, [{"pattern": "429", "threshold": 1, "action": "disable"}])
+    client = TestClient(app)
+
+    assert chat(client).status_code == 503
+
+    assert await manager.is_disabled(PROVIDER_ID) is False
+    status = client.get("/v1/status").json()
+    assert status["cooldown_count"] == 1
+    assert status["fail_counts"] == {PROVIDER_ID: 1}
+
+
+async def test_stream_custom_rule_disable_falls_back():
+    # 流式内容前失败触发规则禁用：回退到 P2，且 P1 被规则禁用
+    p1 = DummyProvider(error=ERROR_429)
+    p2 = DummyProvider(text="hello")
+    app, manager = build_app({PROVIDER_ID: p1, PROVIDER_ID_2: p2}, policy=[[1, 1]])
+    await manager.set_rules(PROVIDER_ID, [{"pattern": "429", "threshold": 1, "action": "disable"}])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+
+    assert response.status_code == 200
+    assert p2.calls == 1
+    assert "data: [DONE]" in response.text
+    assert await manager.is_disabled(PROVIDER_ID) is True
