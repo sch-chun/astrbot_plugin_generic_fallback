@@ -201,6 +201,14 @@ function closeLogModal() {
 }
 
 // ---------- 自定义规则模态框 ----------
+// 动作下拉框宽度「顶着」当前选项文字：用同字体隐藏 span 实测文本宽，再加下拉箭头占用。
+// 短选项（冷却/禁用）自动收窄，省下的宽度让给匹配内容输入框；长选项（冷却到第二天）
+// 自动加宽到刚好容纳，不会被右侧下拉按钮截断
+const ACTION_ARROW_ALLOWANCE = 46; // 左内边距 8 + 边框 2 + 右下拉箭头与间距 + 余量
+const actionMeasurer = document.createElement('span');
+actionMeasurer.style.cssText = 'position:absolute;top:-9999px;visibility:hidden;white-space:nowrap;font-size:13px;';
+document.body.appendChild(actionMeasurer);
+
 function describeAction(rule) {
   if (rule.action === 'disable') return '禁用';
   if (rule.action === 'until_midnight') return '冷却到第二天 00:00';
@@ -224,6 +232,7 @@ function openRulesModal(providerId) {
   document.getElementById('rule-action').value = 'cooldown';
   document.getElementById('rule-minutes').value = '';
   syncMinutesVisibility();
+  syncActionWidth();
   renderRulesList();
   openModalEl(document.getElementById('rules-modal'));
 }
@@ -267,8 +276,16 @@ function renderRulesList() {
 }
 
 function syncMinutesVisibility() {
-  // 冷却分钟数仅对「冷却指定分钟」动作有意义，其余动作隐藏避免误填
+  // 冷却分钟数仅对「冷却」动作有意义，其余动作隐藏避免误填
   document.getElementById('rule-minutes').hidden = document.getElementById('rule-action').value !== 'cooldown';
+}
+
+function syncActionWidth() {
+  const sel = document.getElementById('rule-action');
+  const option = sel.options[sel.selectedIndex];
+  if (!option) return;
+  actionMeasurer.textContent = option.text;
+  sel.style.width = `${Math.ceil(actionMeasurer.offsetWidth) + ACTION_ARROW_ALLOWANCE}px`;
 }
 
 function onRuleClick(event) {
@@ -472,7 +489,10 @@ async function init() {
   document.getElementById('rules-close').addEventListener('click', () => closeRulesModal(false));
   document.getElementById('rules-save-btn').addEventListener('click', onRuleSaveClick);
   document.getElementById('rule-form').addEventListener('submit', onRuleAddClick);
-  document.getElementById('rule-action').addEventListener('change', syncMinutesVisibility);
+  document.getElementById('rule-action').addEventListener('change', () => {
+    syncMinutesVisibility();
+    syncActionWidth();
+  });
   document.getElementById('rules-modal').addEventListener('click', (event) => {
     if (event.target.id === 'rules-modal') closeRulesModal(false);
   });
