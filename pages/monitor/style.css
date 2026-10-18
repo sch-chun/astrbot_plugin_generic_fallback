@@ -14,6 +14,8 @@
   --text: #e0e0e0;
   --card-bg: #2d2d2d;
   --border: #3d3d3d;
+  /* 让原生表单控件（输入框/下拉）跟随深色主题 */
+  color-scheme: dark;
 }
 
 body {
@@ -93,14 +95,25 @@ h1 {
   gap: 15px;
 }
 
-#refresh-btn {
+/* 主按钮：刷新、弹窗确定与规则保存共用 */
+.btn-primary {
   background: var(--primary);
   color: white;
   border: none;
-  padding: 8px 16px;
+  padding: 6px 18px;
   border-radius: 6px;
   cursor: pointer;
   transition: opacity 0.2s ease, transform 0.1s ease;
+}
+.btn-primary:hover {
+  opacity: 0.85;
+}
+.btn-primary:active {
+  transform: scale(0.97);
+}
+
+#refresh-btn {
+  padding: 8px 16px;
 }
 #refresh-btn:hover {
   opacity: 0.85;
@@ -138,7 +151,8 @@ h1 {
 
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* 220→240：卡片按钮增至三个（禁用/日志/规则），留足单行排布宽度 */
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 12px;
   margin-top: 10px;
 }
@@ -195,6 +209,9 @@ h1 {
 .provider-meta .meta-cooldown {
   color: var(--warning);
 }
+.provider-meta .meta-rule {
+  color: var(--primary);
+}
 .provider-meta .meta-sep {
   color: var(--border);
 }
@@ -235,9 +252,10 @@ h1 {
   transform: none;
 }
 
-/* 「禁用/解禁」两态等宽；「日志」单态可窄一些 */
+/* 「禁用/解禁」两态等宽；「日志」「规则」单态可窄一些 */
 .provider-card .toggle-btn { min-width: 60px; }
 .provider-card .log-btn { min-width: 44px; }
+.provider-card .rule-btn { min-width: 44px; }
 
 #policy-hint {
   margin-top: 6px;
@@ -263,6 +281,12 @@ h1 {
 }
 .modal[hidden] {
   display: none;
+}
+
+/* 通用提示永远浮在最上层：它可能在规则/日志模态框之上弹出（如表单校验失败），
+   两者 z-index 相同时 DOM 在后的规则模态框会盖住提示，导致按钮点不到 */
+#modal {
+  z-index: 110;
 }
 
 .modal-panel {
@@ -291,13 +315,6 @@ h1 {
 #modal-ok {
   display: block;
   margin-left: auto;
-  background: var(--primary);
-  color: white;
-  border: none;
-  padding: 6px 18px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: opacity 0.2s ease, transform 0.1s ease;
 }
 #modal-ok:hover {
   opacity: 0.85;
@@ -383,6 +400,118 @@ h1 {
   word-break: break-word;
 }
 
+/* 自定义规则模态框 */
+.rules-panel {
+  max-width: 560px;
+}
+
+/* 「未保存」标记：草稿与服务端快照不一致时显示 */
+.rules-dirty {
+  font-size: 12px;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.rules-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #888;
+  line-height: 1.6;
+}
+
+.rules-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* 覆盖 .modal-panel p 的默认 margin */
+.rules-list .rules-empty {
+  margin: 0;
+  font-size: 13px;
+  color: #888;
+}
+
+.rule-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.rule-item:last-child {
+  border-bottom: none;
+}
+
+.rule-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.rule-pattern {
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.rule-condition {
+  color: #888;
+  margin-top: 2px;
+}
+
+.rule-hits {
+  flex-shrink: 0;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+/* 达到阈值：下一次匹配即触发，用警示色突出 */
+.rule-hits.hot {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+/* 添加规则表单：匹配内容自适应占满，其余控件定宽 */
+.rule-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.rule-form input,
+.rule-form select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+.rule-form input:focus,
+.rule-form select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+.rule-form input::placeholder {
+  color: #888;
+}
+
+#rule-pattern { flex: 1 1 160px; min-width: 0; }
+#rule-threshold { width: 96px; }
+#rule-action { flex: 1 1 150px; min-width: 0; }
+#rule-minutes { width: 110px; }
+
+.rules-footer {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* 减少动态效果偏好：淡入、错峰与按压反馈全部即时完成 */
 @media (prefers-reduced-motion: reduce) {
   #app,
@@ -392,7 +521,7 @@ h1 {
   .modal-panel,
   .modal.is-open .log-item,
   .btn-outline,
-  #refresh-btn,
+  .btn-primary,
   #modal-ok {
     animation-duration: 0.01ms !important;
     animation-delay: 0ms !important;

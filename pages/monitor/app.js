@@ -3,6 +3,12 @@ const MODAL_ANIM_MS = 200;
 let refreshTimer = null;
 let firstLoadDone = false;
 let firstRenderDone = false;
+// 最近一次状态数据：规则模态框从这里读当前规则（含实时命中数）
+let lastStatus = null;
+// 规则模态框草稿：打开时深拷贝自 lastStatus，保存时整单提交（replace 语义）
+let rulesDraft = [];
+let rulesSnapshot = '';
+let rulesProviderId = null;
 
 async function fetchStatus() {
   try {
@@ -55,7 +61,7 @@ function renderLoading(container) {
     </div>`;
 }
 
-function renderVirtualModels(virtualModels, cooldownList, disabledList, failCounts) {
+function renderVirtualModels(virtualModels, cooldownList, disabledList, failCounts, customRules) {
   const container = document.getElementById('virtual-models');
   if (!virtualModels || virtualModels.length === 0) {
     container.innerHTML = '<p>暂无虚拟模型配置</p>';
@@ -72,6 +78,7 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
 
   const disabledSet = new Set(disabledList || []);
   const failMap = failCounts || {};
+  const rulesMap = customRules || {};
 
   let html = '';
   for (const v of virtualModels) {
@@ -91,6 +98,7 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
       for (const pid of providerIds) {
         const remaining = cooldownMap[pid] || 0;
         const failures = failMap[pid] || 0;
+        const ruleCount = (rulesMap[pid] || []).length;
         const isDisabled = disabledSet.has(pid);
         const isCooldown = remaining > 0;
 
@@ -117,6 +125,7 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
                   ${isDisabled ? '解禁' : '禁用'}
                 </button>
                 <button class="btn-outline log-btn" data-pid="${escapeHtml(pid)}">日志</button>
+                <button class="btn-outline rule-btn" data-pid="${escapeHtml(pid)}">规则</button>
               </div>
             </div>`;
 
@@ -127,6 +136,9 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
         }
         if (failures > 0) {
           metaParts.push('<span class="meta-fail">连续失败 ' + failures + ' 次</span>');
+        }
+        if (ruleCount > 0) {
+          metaParts.push('<span class="meta-rule">规则 ×' + ruleCount + '</span>');
         }
         if (metaParts.length > 0) {
           html += `<div class="provider-meta">${metaParts.join('<span class="meta-sep">·</span>')}</div>`;
@@ -147,6 +159,9 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
   }
   for (const btn of container.querySelectorAll('.log-btn')) {
     btn.addEventListener('click', onLogClick);
+  }
+  for (const btn of container.querySelectorAll('.rule-btn')) {
+    btn.addEventListener('click', onRuleClick);
   }
 }
 
@@ -183,6 +198,158 @@ function closeModal() {
 
 function closeLogModal() {
   closeModalEl(document.getElementById('log-modal'));
+}
+
+// ---------- 自定义规则模态框 ----------
+function describeAction(rule) {
+  if (rule.action === 'disable') return '禁用';
+  if (rule.action === 'until_midnight') return '冷却到第二天 00:00';
+  return `冷却 ${formatMinutes(rule.cooldown_minutes)}`;
+}
+
+function isRulesDirty() {
+  return JSON.stringify(rulesDraft) !== rulesSnapshot;
+}
+
+function openRulesModal(providerId) {
+  rulesProviderId = providerId;
+  const stored = (lastStatus && lastStatus.custom_rules && lastStatus.custom_rules[providerId]) || [];
+  // 深拷贝：草稿的增删不能直接写进 lastStatus，否则未保存也会被当成已保存
+  rulesDraft = stored.map((rule) => ({ ...rule }));
+  rulesSnapshot = JSON.stringify(rulesDraft);
+
+  document.getElementById('rules-title').textContent = `自定义规则：${providerId}`;
+  document.getElementById('rule-pattern').value = '';
+  document.getElementById('rule-threshold').value = '';
+  document.getElementById('rule-action').value = 'cooldown';
+  document.getElementById('rule-minutes').value = '';
+  syncMinutesVisibility();
+  renderRulesList();
+  openModalEl(document.getElementById('rules-modal'));
+}
+
+function closeRulesModal(saved) {
+  // 丢弃未保存修改时明确告知，避免用户误以为已生效
+  if (!saved && isRulesDirty()) {
+    showModal('已丢弃未保存的规则修改');
+  }
+  closeModalEl(document.getElementById('rules-modal'));
+}
+
+function renderRulesList() {
+  const list = document.getElementById('rules-list');
+  document.getElementById('rules-dirty').hidden = !isRulesDirty();
+
+  if (rulesDraft.length === 0) {
+    list.innerHTML = '<p class="rules-empty">暂无规则，可在下方添加</p>';
+    return;
+  }
+
+  let html = '';
+  for (let i = 0; i < rulesDraft.length; i++) {
+    const rule = rulesDraft[i];
+    const hits = rule.hits || 0;
+    // 达到阈值即下一次匹配命中时触发，高亮提醒
+    const hot = hits >= rule.threshold;
+    html += `<div class="rule-item">
+      <div class="rule-info">
+        <div class="rule-pattern">${escapeHtml(rule.pattern)}</div>
+        <div class="rule-condition">连续 ${rule.threshold} 次 → ${escapeHtml(describeAction(rule))}</div>
+      </div>
+      <span class="rule-hits${hot ? ' hot' : ''}" title="已连续命中次数 / 触发阈值">${hits}/${rule.threshold}</span>
+      <button class="btn-outline rule-delete-btn" data-rule-index="${i}">删除</button>
+    </div>`;
+  }
+  list.innerHTML = html;
+  for (const btn of list.querySelectorAll('.rule-delete-btn')) {
+    btn.addEventListener('click', onRuleDeleteClick);
+  }
+}
+
+function syncMinutesVisibility() {
+  // 冷却分钟数仅对「冷却指定分钟」动作有意义，其余动作隐藏避免误填
+  document.getElementById('rule-minutes').hidden = document.getElementById('rule-action').value !== 'cooldown';
+}
+
+function onRuleClick(event) {
+  openRulesModal(event.currentTarget.dataset.pid);
+}
+
+function onRuleDeleteClick(event) {
+  const index = Number(event.currentTarget.dataset.ruleIndex);
+  if (Number.isInteger(index) && index >= 0 && index < rulesDraft.length) {
+    rulesDraft.splice(index, 1);
+    renderRulesList();
+  }
+}
+
+function onRuleAddClick(event) {
+  event.preventDefault();
+  const pattern = document.getElementById('rule-pattern').value.trim();
+  const thresholdRaw = document.getElementById('rule-threshold').value.trim();
+  const action = document.getElementById('rule-action').value;
+  const minutesRaw = document.getElementById('rule-minutes').value.trim();
+
+  // 前端校验与服务端 validate_rules 保持一致，消息同样用中文
+  if (!pattern) {
+    showModal('匹配内容不能为空');
+    return;
+  }
+  if (pattern.length > 100) {
+    showModal('匹配内容不能超过 100 个字符');
+    return;
+  }
+  const threshold = Number(thresholdRaw);
+  if (!thresholdRaw || !Number.isInteger(threshold) || threshold < 1) {
+    showModal('连续次数必须是大于 0 的整数');
+    return;
+  }
+  let cooldownMinutes = null;
+  if (action === 'cooldown') {
+    cooldownMinutes = Number(minutesRaw);
+    if (!minutesRaw || !(cooldownMinutes > 0)) {
+      showModal('冷却分钟数必须是大于 0 的数字');
+      return;
+    }
+  }
+
+  const rule = { pattern, threshold, action };
+  if (action === 'cooldown') rule.cooldown_minutes = cooldownMinutes;
+  rulesDraft.push(rule);
+  renderRulesList();
+
+  document.getElementById('rule-pattern').value = '';
+  document.getElementById('rule-threshold').value = '';
+  document.getElementById('rule-minutes').value = '';
+  document.getElementById('rule-pattern').focus();
+}
+
+async function onRuleSaveClick() {
+  if (!rulesProviderId) return;
+  const btn = document.getElementById('rules-save-btn');
+  btn.disabled = true;
+  try {
+    const data = await bridge.apiPost('rules/set', {
+      provider_id: rulesProviderId,
+      rules: rulesDraft,
+    });
+    if (data && data.ok) {
+      // 用服务端返回的归一化规则（含新 id 与实时命中数）更新本地缓存
+      if (lastStatus) {
+        lastStatus.custom_rules = lastStatus.custom_rules || {};
+        lastStatus.custom_rules[rulesProviderId] = data.rules || [];
+      }
+      closeRulesModal(true);
+      await refreshDashboard();
+    } else {
+      showModal(`保存失败: ${(data && data.error) || '未知错误'}`);
+    }
+  } catch (err) {
+    console.error('保存自定义规则失败:', err);
+    showModal(`保存失败: ${err && err.message ? err.message : err}`);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function formatLogTime(iso) {
@@ -270,9 +437,16 @@ async function refreshDashboard() {
     return;
   }
   firstLoadDone = true;
+  lastStatus = data;
 
   renderPolicy(data.cooldown_policy);
-  renderVirtualModels(data.virtual_models, data.cooldown_list, data.disabled_list, data.fail_counts);
+  renderVirtualModels(
+    data.virtual_models,
+    data.cooldown_list,
+    data.disabled_list,
+    data.fail_counts,
+    data.custom_rules
+  );
 
   const now = new Date();
   document.getElementById('last-update').textContent = `最后更新: ${now.toLocaleTimeString()}`;
@@ -294,10 +468,20 @@ async function init() {
   document.getElementById('log-modal').addEventListener('click', (event) => {
     if (event.target.id === 'log-modal') closeLogModal();
   });
+
+  document.getElementById('rules-close').addEventListener('click', () => closeRulesModal(false));
+  document.getElementById('rules-save-btn').addEventListener('click', onRuleSaveClick);
+  document.getElementById('rule-form').addEventListener('submit', onRuleAddClick);
+  document.getElementById('rule-action').addEventListener('change', syncMinutesVisibility);
+  document.getElementById('rules-modal').addEventListener('click', (event) => {
+    if (event.target.id === 'rules-modal') closeRulesModal(false);
+  });
+
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       closeModal();
       closeLogModal();
+      closeRulesModal(false);
     }
   });
 
