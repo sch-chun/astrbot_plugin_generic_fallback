@@ -34,7 +34,7 @@ git clone https://github.com/sch-chun/astrbot_plugin_generic_fallback.git
 | `proxy_host` | string | `127.0.0.1` | 代理服务监听地址，建议保持本机 |
 | `proxy_port` | int | `3474` | 代理服务监听端口 |
 | `proxy_api_key` | string | (空) | 代理层 API Key，留空则不验证 |
-| `empty_response_max_attempts` | int | `3` | 空响应重试次数，超过后回退到下一个 Provider 但不计入连续失败（流式下为原地重试同一 Provider，耗尽后以错误 chunk 收尾——响应头已发出，无法切换 Provider） |
+| `empty_response_max_attempts` | int | `3` | 空响应重试次数，超过后回退到下一个 Provider 但不计入连续失败（流式下重试与回退均在首个内容字节发出前完成；全部 Provider 均不可用时返回 503，与非流式一致） |
 | `cooldown_policy` | list | `[[1, 1], [2, 5], [5, 30]]` | 连续失败冷却阶梯（分钟），详见下 |
 | `log_response` | bool | `false` | 打印上游响应到日志（调试用） |
 | `virtual_models` | list | (见下) | 虚拟模型配置列表 |
