@@ -112,23 +112,6 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
           statusText = '冷却中';
         }
 
-        html += `
-          <div class="provider-card">
-            <div class="name" title="${escapeHtml(pid)}">${escapeHtml(pid)}</div>
-            <div class="status-row">
-              <div class="status">
-                <span class="dot ${statusClass}"></span>
-                <span>${statusText}</span>
-              </div>
-              <div class="card-actions">
-                <button class="btn-outline toggle-btn" data-pid="${escapeHtml(pid)}" data-action="${isDisabled ? 'enable' : 'disable'}">
-                  ${isDisabled ? '解禁' : '禁用'}
-                </button>
-                <button class="btn-outline log-btn" data-pid="${escapeHtml(pid)}">日志</button>
-                <button class="btn-outline rule-btn" data-pid="${escapeHtml(pid)}">规则</button>
-              </div>
-            </div>`;
-
         // 剩余冷却时间与连续失败次数合并一行，避免卡片高度参差不齐
         const metaParts = [];
         if (isCooldown && !isDisabled) {
@@ -140,11 +123,30 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
         if (ruleCount > 0) {
           metaParts.push('<span class="meta-rule">' + ruleCount + ' 条自定义规则</span>');
         }
-        if (metaParts.length > 0) {
-          html += `<div class="provider-meta">${metaParts.join('<span class="meta-sep">·</span>')}</div>`;
-        }
+        const metaHtml = metaParts.length > 0
+          ? `<div class="provider-meta">${metaParts.join('<span class="meta-sep">·</span>')}</div>`
+          : '';
 
-        html += `</div>`;
+        // 左信息列（名称/状态/元信息）与右按钮列相互独立：
+        // 按钮三行不再把元信息挤到卡片底部，卡片高度取两列较大值
+        html += `
+          <div class="provider-card">
+            <div class="card-main">
+              <div class="name" title="${escapeHtml(pid)}">${escapeHtml(pid)}</div>
+              <div class="status">
+                <span class="dot ${statusClass}"></span>
+                <span>${statusText}</span>
+              </div>
+              ${metaHtml}
+            </div>
+            <div class="card-actions">
+              <button class="btn-outline toggle-btn" data-pid="${escapeHtml(pid)}" data-action="${isDisabled ? 'enable' : 'disable'}">
+                ${isDisabled ? '解禁' : '禁用'}
+              </button>
+              <button class="btn-outline log-btn" data-pid="${escapeHtml(pid)}">日志</button>
+              <button class="btn-outline rule-btn" data-pid="${escapeHtml(pid)}">规则</button>
+            </div>
+          </div>`;
       }
     }
     html += `</div></div>`;
