@@ -174,7 +174,7 @@ h1 {
 .provider-card .status-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   margin-top: 6px;
 }
@@ -216,9 +216,10 @@ h1 {
   color: var(--border);
 }
 
-/* 卡片右侧操作区：禁用/解禁 + 日志 */
+/* 卡片右侧操作区：禁用/解禁、规则、日志纵向一列，避免横向拥挤 */
 .card-actions {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
 }
@@ -252,10 +253,50 @@ h1 {
   transform: none;
 }
 
-/* 「禁用/解禁」两态等宽；「日志」「规则」单态可窄一些 */
-.provider-card .toggle-btn { min-width: 60px; }
-.provider-card .log-btn { min-width: 44px; }
-.provider-card .rule-btn { min-width: 44px; }
+/* 三个操作按钮等宽：列向 stretch 已对齐，min-width 保底防文字撑窄 */
+.provider-card .toggle-btn,
+.provider-card .log-btn,
+.provider-card .rule-btn {
+  min-width: 52px;
+}
+
+/* 颜色与反馈形态按语义区分：禁用=红 / 解禁=绿 / 规则=主色蓝 / 日志=中性灰。
+   特异性（0,3,0）压过 .btn-outline:hover（0,2,0），hover 态需重复声明颜色 */
+.provider-card .toggle-btn[data-action='disable'] {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.45);
+}
+.provider-card .toggle-btn[data-action='disable']:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+}
+.provider-card .toggle-btn[data-action='enable'] {
+  color: var(--success);
+  border-color: rgba(34, 197, 94, 0.45);
+}
+.provider-card .toggle-btn[data-action='enable']:hover {
+  color: var(--success);
+  border-color: var(--success);
+  background: rgba(34, 197, 94, 0.08);
+}
+.provider-card .rule-btn {
+  color: var(--primary);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+.provider-card .rule-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+/* 日志优先级低：中性灰，hover 仅加深文字与边框、不加底色 */
+.provider-card .log-btn {
+  color: #888;
+}
+.provider-card .log-btn:hover {
+  color: var(--text);
+  border-color: #888;
+}
 
 #policy-hint {
   margin-top: 6px;

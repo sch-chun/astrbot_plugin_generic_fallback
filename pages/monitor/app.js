@@ -138,7 +138,7 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
           metaParts.push('<span class="meta-fail">连续失败 ' + failures + ' 次</span>');
         }
         if (ruleCount > 0) {
-          metaParts.push('<span class="meta-rule">规则 ×' + ruleCount + '</span>');
+          metaParts.push('<span class="meta-rule">' + ruleCount + ' 条自定义规则</span>');
         }
         if (metaParts.length > 0) {
           html += `<div class="provider-meta">${metaParts.join('<span class="meta-sep">·</span>')}</div>`;
