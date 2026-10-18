@@ -505,7 +505,8 @@ h1 {
 
 #rule-pattern { flex: 1 1 140px; min-width: 0; }
 #rule-threshold { width: 64px; }
-#rule-action { width: 112px; }
+/* JS 会按当前选项文字实测覆盖此宽度；128 为无 JS 时容纳最长选项的安全宽度 */
+#rule-action { width: 128px; }
 #rule-minutes { width: 68px; }
 
 .rules-footer {
