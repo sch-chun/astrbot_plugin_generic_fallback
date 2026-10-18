@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- 监控面板支持为每个 Provider 配置可选的自定义规则：失败原因包含指定匹配内容（不区分大小写）并连续命中设定次数时，触发「冷却指定分钟 / 冷却到第二天 00:00 / 禁用」三种动作之一；规则命中时跳过内置冷却阶梯。规则与实时命中数（x/N）在卡片徽章与规则模态框中展示，达到阈值的规则高亮提示；规则保存在插件 KV 中，重启后自动恢复，单条规则非法只丢弃该条。新增 `POST /generic_fallback/rules/set` 接口，`status` 接口新增 `custom_rules` 字段
 - 监控面板支持查看单个 Provider 的近期调用日志（时间、成败、失败原因）：Provider 卡片新增「日志」按钮，
   数据经 `GET /generic_fallback/logs?provider_id=...` 读取，内存中最多保留最近 200 条
 
