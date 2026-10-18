@@ -473,11 +473,11 @@ h1 {
   font-weight: 600;
 }
 
-/* 添加规则表单：匹配内容自适应占满，其余控件定宽 */
+/* 添加规则表单：全部控件争取单行排布——匹配内容自适应占满，其余定宽 */
 .rule-form {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
@@ -491,6 +491,8 @@ h1 {
   border-radius: 6px;
   padding: 5px 8px;
   font-size: 13px;
+  /* 定宽即实际占位（含内边距与边框），单行宽度预算才可预测 */
+  box-sizing: border-box;
 }
 .rule-form input:focus,
 .rule-form select:focus {
@@ -501,10 +503,10 @@ h1 {
   color: #888;
 }
 
-#rule-pattern { flex: 1 1 160px; min-width: 0; }
-#rule-threshold { width: 96px; }
-#rule-action { flex: 1 1 150px; min-width: 0; }
-#rule-minutes { width: 110px; }
+#rule-pattern { flex: 1 1 140px; min-width: 0; }
+#rule-threshold { width: 64px; }
+#rule-action { width: 112px; }
+#rule-minutes { width: 68px; }
 
 .rules-footer {
   margin-top: 12px;
