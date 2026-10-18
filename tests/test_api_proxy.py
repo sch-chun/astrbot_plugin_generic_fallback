@@ -18,13 +18,23 @@ VIRTUAL_MODEL = "vm"
 class DummyProvider(Provider):
     """可注入失败/成功行为的 Chat Provider 替身"""
 
-    def __init__(self, text: str = "ok", error: str | None = None):
+    def __init__(
+        self,
+        text: str = "ok",
+        error: str | None = None,
+        stream_empty: bool = False,
+        stream_error_after_content: bool = False,
+        stream_empty_first: int = 0,
+    ):
         super().__init__(
             provider_config={"id": PROVIDER_ID, "type": "openai_chat_completion"},
             provider_settings={},
         )
         self.text = text
         self.error = error
+        self.stream_empty = stream_empty
+        self.stream_error_after_content = stream_error_after_content
+        self.stream_empty_first = stream_empty_first
         self.calls = 0
 
     def get_current_key(self) -> str:
@@ -46,6 +56,14 @@ class DummyProvider(Provider):
         self.calls += 1
         if self.error:
             raise RuntimeError(self.error)
+        if self.stream_empty_first > 0:
+            self.stream_empty_first -= 1
+            return
+        if self.stream_error_after_content:
+            yield LLMResponse(role="assistant", completion_text="chunk", is_chunk=True)
+            raise RuntimeError("mid-stream failure")
+        if self.stream_empty:
+            return
         yield LLMResponse(role="assistant", completion_text="chunk", is_chunk=True)
         yield LLMResponse(role="assistant", completion_text=self.text)
 
@@ -150,16 +168,83 @@ async def test_no_choices_does_not_cooldown():
 
 
 async def test_stream_no_choices_does_not_cooldown():
-    # 流式没有重试机制，但仍应与非流式保持一致：只回退不冷却
+    # no choices 属于「上游无有效内容」，与非流式一致：原地重试、只回退不冷却
     provider = DummyProvider(error="completion has no choices")
     app, _ = build_app(provider, policy=[[1, 1]])
     client = TestClient(app)
 
     assert chat(client, stream=True).status_code == 200
 
+    assert provider.calls == 3  # 等于 empty_response_max_attempts 默认值
     status = client.get("/v1/status").json()
     assert status["cooldown_count"] == 0
     assert status["fail_counts"] == {}
+
+
+async def test_stream_empty_response_retries_in_place():
+    # 上游返回空流（零 chunk）：应与非流式一样原地重试，耗尽后记录失败但不冷却
+    provider = DummyProvider(stream_empty=True)
+    app, manager = build_app(provider, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+    assert response.status_code == 200
+
+    assert provider.calls == 3  # 原地重试满 empty_response_max_attempts
+    assert 'data: {"error": "empty stream response"}' in response.text
+    assert "data: [DONE]" in response.text
+    status = client.get("/v1/status").json()
+    assert status["cooldown_count"] == 0
+    assert status["fail_counts"] == {}  # 空响应不计入连续失败
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1  # 原地重试只记一条结局
+    assert logs[0]["success"] is False
+    assert "空响应" in logs[0]["reason"]
+
+
+async def test_stream_empty_final_response_retries_in_place():
+    # 只回来一个空的最终响应（无内容、无工具调用）：同样视为空流
+    provider = DummyProvider(stream_empty_first=3)
+    app, _ = build_app(provider, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+
+    assert provider.calls == 3
+    assert 'data: {"error": "empty stream response"}' in response.text
+    assert client.get("/v1/status").json()["cooldown_count"] == 0
+
+
+async def test_stream_empty_then_success():
+    # 空流重试后恢复：第二次调用有内容，应标记成功且不出现错误 chunk
+    provider = DummyProvider(text="hello", stream_empty_first=1)
+    app, manager = build_app(provider, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+
+    assert provider.calls == 2
+    assert "data: [DONE]" in response.text
+    assert "error" not in response.text
+    logs = await manager.get_call_log(PROVIDER_ID)
+    assert len(logs) == 1
+    assert logs[0]["success"] is True
+
+
+async def test_stream_error_after_content_does_not_retry():
+    # 内容已发出后异常：重试会向客户端重复发送内容，只能以错误 chunk 收尾
+    provider = DummyProvider(stream_error_after_content=True)
+    app, _ = build_app(provider, policy=[[1, 1]])
+    client = TestClient(app)
+
+    response = chat(client, stream=True)
+
+    assert provider.calls == 1  # 不重试
+    assert 'data: {"error": "provider error"}' in response.text
+    assert "data: [DONE]" in response.text
+    status = client.get("/v1/status").json()
+    assert status["cooldown_count"] == 1  # 普通异常照常冷却
+    assert status["fail_counts"] == {PROVIDER_ID: 1}
 
 
 async def test_stream_unsupported_media_type_does_not_cooldown():
