@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.1.0] - 2026-10-19
 
 ### Fixed
 - 修复插件重载后首批 Provider 调用集中报 `Event loop is closed` 并被误标记冷却的问题。根因：代理服务（uvicorn）此前跑在独立线程的事件循环里，Provider（AstrBot 核心单例，跨插件重载存活）的 HTTP 连接池会把 keep-alive 连接绑定到该线程的循环；重载时循环关闭、池里留下僵尸连接，重载后首批请求复用它们即抛 `RuntimeError: Event loop is closed`——被回退逻辑的异常分支吞掉，记为一次失败并把 Provider 拖进冷却，表现为「集中爆发一遍然后正常」。现在 `serve()` 作为任务运行在 AstrBot 主事件循环上（与 AstrBot 仪表盘同循环），连接池随主循环存活，重载不再产生僵尸连接；`terminate()` 同步改为优雅等待在途请求完成（超时 10 秒后强制取消），不再以阻塞式 `join(timeout=5)` 放弃收尾，端口保证释放
