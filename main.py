@@ -36,6 +36,12 @@ RULES_KV_KEY = "custom_rules"
 # 超时后 uvicorn 会取消在途任务，保证端口一定被释放
 GRACEFUL_SHUTDOWN_TIMEOUT = 10
 
+# 启动等待上限（秒）与轮询间隔（秒）：uvicorn 从 create_task 到真正 bind+listen
+# 实测 150~300ms，慢机器更久。轮询 server.started 而非魔法数 sleep——正常路径
+# 一等就退，只有异常慢启动才会耗到上限，且不会在服务没起来时误打「已启动」日志
+STARTUP_WAIT_TIMEOUT = 2.0
+STARTUP_POLL_INTERVAL = 0.01
+
 
 class _MainLoopProxyServer(uvicorn.Server):
     """运行在 AstrBot 主事件循环上的代理 Server。
@@ -201,9 +207,18 @@ class GenericFallbackProxyPlugin(Star):
             return
 
         # serve() 是主循环上的任务，启动期错误（如端口绑定失败）异步抛出——
-        # 让出一个步进暴露它，避免「initialize 显示成功、服务其实没起来」
+        # 轮询 server.started（uvicorn 在 create_server 成功后置位）而非魔法数
+        # sleep：既等足 listen 延迟，也不会在服务没起来时误打「已启动」日志
         # （具体报错由 _on_serve_task_done 统一记录，这里只做状态清理）
-        await asyncio.sleep(0.05)
+        for _ in range(int(STARTUP_WAIT_TIMEOUT / STARTUP_POLL_INTERVAL)):
+            if (
+                self._serve_task is None
+                or self._serve_task.done()
+                or self._uvicorn_server is None
+                or self._uvicorn_server.started
+            ):
+                break
+            await asyncio.sleep(STARTUP_POLL_INTERVAL)
         if self._serve_task is not None and self._serve_task.done() and not self._serve_task.cancelled():
             if self._serve_task.exception() is not None:
                 self._serve_task = None
