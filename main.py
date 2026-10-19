@@ -2,7 +2,7 @@
 基于 Provider 回退的通用代理服务，支持用户从管理面板选择多个 Provider 作为回退链。
 """
 import asyncio
-import threading
+import contextlib
 import socket
 import time
 import uvicorn
@@ -10,7 +10,7 @@ from fastapi import FastAPI
 import yaml
 from pathlib import Path
 
-from typing import Optional, Callable, Union
+from typing import Optional, Union
 from fastapi.responses import JSONResponse
 from quart.wrappers import Response
 
@@ -32,18 +32,32 @@ from .src.api_proxy import create_proxy_router
 # 自定义规则在插件 KV 中的存储键
 RULES_KV_KEY = "custom_rules"
 
+# 优雅关闭上限（秒）：插件重载/卸载时给在途 LLM 调用留完成时间，
+# 超时后 uvicorn 会取消在途任务，保证端口一定被释放
+GRACEFUL_SHUTDOWN_TIMEOUT = 10
+
+
+class _MainLoopProxyServer(uvicorn.Server):
+    """运行在 AstrBot 主事件循环上的代理 Server。
+
+    uvicorn 默认会在 serve() 期间捕获 SIGINT/SIGTERM 并自行退出；信号所有权归 AstrBot，
+    这里禁掉捕获——代理服务的退出完全由插件 terminate() 置 should_exit 驱动。
+    """
+
+    def capture_signals(self):
+        return contextlib.nullcontext()
+
 
 class GenericFallbackProxyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
         self._uvicorn_server: Optional[uvicorn.Server] = None
-        self._server_thread: Optional[threading.Thread] = None
+        self._serve_task: Optional[asyncio.Task] = None
         self._model_manager: Optional[ModelManager] = None
         self._proxy_config: Optional[ProxyConfig] = None
         self._fastapi_app: Optional[FastAPI] = None
         self._virtual_models: list[dict] = []
         self.config: AstrBotConfig = config
-        self._close_http_client: Optional[Callable] = None
 
         meta_path = Path(__file__).parent / "metadata.yaml"
         plugin_name = "generic_fallback"
@@ -186,6 +200,16 @@ class GenericFallbackProxyPlugin(Star):
         if not self._start_uvicorn():
             return
 
+        # serve() 是主循环上的任务，启动期错误（如端口绑定失败）异步抛出——
+        # 让出一个步进暴露它，避免「initialize 显示成功、服务其实没起来」
+        # （具体报错由 _on_serve_task_done 统一记录，这里只做状态清理）
+        await asyncio.sleep(0.05)
+        if self._serve_task is not None and self._serve_task.done() and not self._serve_task.cancelled():
+            if self._serve_task.exception() is not None:
+                self._serve_task = None
+                self._uvicorn_server = None
+                return
+
         logger.info(f"✅ 通用回退代理服务已启动 (地址: {proxy_host}:{proxy_port})")
         if proxy_api_key:
             logger.info("   🔑 API Key 验证已启用")
@@ -294,16 +318,14 @@ class GenericFallbackProxyPlugin(Star):
         host = self._proxy_config.proxy_host
         port = self._proxy_config.proxy_port
 
-        # 端口重试
+        # 端口重试：terminate() 会等优雅关闭完成、端口必然已释放，正常情况下不会命中；
+        # 这里是兜底——端口被其他进程占用时自动重试数次，持续失败则明确报错
         for attempt in range(5):
             if self._is_port_available(port, host):
                 break
             if attempt == 0:
-                # 刚重载/重启过插件时，上次的模型调用可能还没收到返回，
-                # 旧服务线程仍在等待其结束，端口随之未被释放
                 logger.warning(
-                    f"端口 {host}:{port} 被占用。若刚重载或重启过插件，可能是上次的模型调用"
-                    "尚未返回，旧代理线程仍在等待连接关闭、端口未释放；"
+                    f"端口 {host}:{port} 被占用（可能有其他进程占用，或上次关闭尚未完全结束），"
                     "下面会自动重试数次，若持续失败可查看占用进程："
                     f"netstat -ano | findstr :{port}（Windows）或 ss -ltnp | grep {port}（Linux）"
                 )
@@ -320,15 +342,33 @@ class GenericFallbackProxyPlugin(Star):
             port=port,
             log_level="info",
             loop="asyncio",
+            timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT,
         )
-        self._uvicorn_server = uvicorn.Server(config=config)
-        self._server_thread = threading.Thread(
-            target=self._uvicorn_server.run,
-            daemon=True,
-            name="generic-fallback",
+        self._uvicorn_server = _MainLoopProxyServer(config=config)
+        # 关键：serve() 作为任务跑在 AstrBot 主事件循环上，而不是独立线程的循环。
+        # Provider 的 HTTP 连接池（httpx/httpcore keep-alive）随主循环存活，插件重载时
+        # 不会留下「绑定到已关闭循环」的僵尸连接——否则重载后首批请求会集中报
+        # RuntimeError: Event loop is closed，被 _call_provider 的 except 吞掉，
+        # 还把 Provider 误标记进冷却。
+        self._serve_task = asyncio.get_running_loop().create_task(
+            self._uvicorn_server.serve(),
+            name="generic-fallback-proxy",
         )
-        self._server_thread.start()
+        self._serve_task.add_done_callback(self._on_serve_task_done)
         return True
+
+    def _on_serve_task_done(self, task: "asyncio.Task") -> None:
+        """serve() 任务非正常退出时留痕（正常关闭与主动取消不记）"""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        server = self._uvicorn_server
+        if server is not None and not server.started:
+            logger.error(f"❌ 代理服务启动失败: {exc}")
+        else:
+            logger.error(f"代理服务异常退出: {exc}")
 
     def _is_port_available(self, port: int, host: str = "127.0.0.1") -> bool:
         try:
@@ -340,15 +380,25 @@ class GenericFallbackProxyPlugin(Star):
 
     async def terminate(self) -> None:
         logger.info("正在关闭通用回退代理服务...")
-        if self._uvicorn_server:
-            self._uvicorn_server.should_exit = True
-            self._uvicorn_server = None
-        if self._server_thread and self._server_thread.is_alive():
-            self._server_thread.join(timeout=5)
-        await asyncio.sleep(0.5)
-        if self._close_http_client:
+        server = self._uvicorn_server
+        task = self._serve_task
+        if server is not None and task is not None and not task.done():
+            server.should_exit = True
+            # 等优雅关闭真正完成（在途请求有机会发完响应、端口一定释放）后再返回；
+            # 等待是 await 而非阻塞式 join，主循环上的其他任务不受影响
             try:
-                await self._close_http_client()
-            except Exception as e:
-                logger.warning(f"关闭 HTTP 客户端时异常: {e}")
+                await asyncio.wait_for(
+                    asyncio.shield(task), timeout=GRACEFUL_SHUTDOWN_TIMEOUT + 5
+                )
+            except asyncio.TimeoutError:
+                logger.warning("代理服务优雅关闭超时，强制取消在途请求")
+                server.force_exit = True
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=5)
+                except asyncio.TimeoutError:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+        self._uvicorn_server = None
+        self._serve_task = None
         logger.info("👋 通用回退代理服务已关闭")
