@@ -14,6 +14,7 @@ closed——被 _call_provider 的 except Exception 吞掉，还把 Provider 误
 import asyncio
 import socket
 import threading
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -96,14 +97,30 @@ def _make_plugin(port: int) -> GenericFallbackProxyPlugin:
     )
 
 
-async def _chat_via_proxy(port: int) -> dict:
-    """经代理发一次对话请求，返回响应体（失败时带状态码断言信息）"""
-    async with httpx.AsyncClient(trust_env=False) as client:
-        resp = await client.post(
-            f"http://127.0.0.1:{port}/v1/chat/completions",
-            json={"model": "vm", "messages": [{"role": "user", "content": "hi"}]},
-            timeout=15,
-        )
+async def _chat_via_proxy(port: int, timeout: float = 15) -> dict:
+    """经代理发一次对话请求，返回响应体（失败时带状态码断言信息）
+
+    uvicorn 从 create_task 到真正 bind+listen 有 150~300ms 延迟，initialize()
+    返回后立刻发请求可能吃到 ConnectError。这里只对「连不上」重试直到 deadline，
+    状态码断言留在循环外（拿到响应后的失败按断言失败处理，不属于本重试范畴）。
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            async with httpx.AsyncClient(trust_env=False) as client:
+                resp = await client.post(
+                    f"http://127.0.0.1:{port}/v1/chat/completions",
+                    json={
+                        "model": "vm",
+                        "messages": [{"role": "user", "content": "hi"}],
+                    },
+                    timeout=5,
+                )
+            break
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            if time.monotonic() > deadline:
+                raise
+            await asyncio.sleep(0.05)
     assert resp.status_code == 200, f"代理返回 {resp.status_code}: {resp.text}"
     return resp.json()
 
