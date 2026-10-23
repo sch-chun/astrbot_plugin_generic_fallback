@@ -372,10 +372,11 @@ async def test_apply_rules_until_midnight():
 
 
 async def test_apply_rules_until_midnight_tz():
-    # UTC 基准：冷却应在下一个 UTC 00:00 结束（按本地等价时刻存储）
-    manager = ModelManager(until_midnight_tz="UTC")
+    # 每条规则可单独指定时区：UTC 基准下冷却应在下一个 UTC 00:00 结束
+    manager = ModelManager()
     await manager.set_rules(
-        PROVIDER, [{"pattern": "timeout", "threshold": 1, "action": "until_midnight"}]
+        PROVIDER,
+        [{"pattern": "timeout", "threshold": 1, "action": "until_midnight", "tz": "UTC"}],
     )
     assert await manager.apply_rules(PROVIDER, "connection timeout") is True
 
@@ -386,6 +387,16 @@ async def test_apply_rules_until_midnight_tz():
         now_utc.date() + timedelta(days=1), clock_time.min, tzinfo=timezone.utc
     )
     assert until == expected.astimezone().replace(tzinfo=None)
+
+
+async def test_apply_rules_until_midnight_tz_invalid():
+    # 非法 tz 应在规则校验阶段报错，而非默默回退本机时区
+    manager = ModelManager()
+    with pytest.raises(ValueError):
+        await manager.set_rules(
+            PROVIDER,
+            [{"pattern": "timeout", "threshold": 1, "action": "until_midnight", "tz": "not-a-tz"}],
+        )
 
 
 async def test_apply_rules_without_rules_is_noop():
