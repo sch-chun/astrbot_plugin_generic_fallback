@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Generic Fallback (inverse)">
+  <title>Generic Fallback (inverse)</title>
+  <rect width="512" height="512" fill="#E0E1CC"/>
+  <g fill="none" stroke="#1F1E33" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke-width="34" opacity="0.22">
+      <path d="M72 176 H244"/>
+      <path d="M72 312 H244"/>
+    </g>
+    <path d="M244 176 H284 C330 176 330 218 330 246 V278 C330 306 344 312 366 312" stroke-width="56"/>
+    <path d="M376 260 V364 L440 312 Z" fill="#1F1E33" stroke="none"/>
+  </g>
+</svg>
