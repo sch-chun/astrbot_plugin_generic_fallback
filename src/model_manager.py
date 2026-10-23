@@ -1,3 +1,4 @@
+import re
 import threading
 import uuid
 from collections import deque
@@ -105,20 +106,52 @@ def validate_rules(rules: Any) -> list[dict]:
     return [_normalize_rule(rule, index, seen_ids) for index, rule in enumerate(rules, start=1)]
 
 
+# 时区偏移写法：UTC/GMT 前缀 + 带符号数字，可含 :mm 或 .5（如 UTC+8、GMT-5.5、UTC+05:30）
+_OFFSET_RE = re.compile(r"^(?:utc|gmt)\s*([+-]?\d+(?::\d+)?(?:\.\d+)?)$", re.IGNORECASE)
+
+
+def _parse_offset_hours(num: str) -> float:
+    """解析偏移数值：支持 +8 / -5 / 5.5 / 05:30（冒号表示分钟）"""
+    sign = 1
+    if num[0] == "+":
+        num = num[1:]
+    elif num[0] == "-":
+        sign = -1
+        num = num[1:]
+    if ":" in num:
+        hh, mm = num.split(":", 1)
+        hours = int(hh) + int(mm) / 60
+    else:
+        hours = float(num)
+    return sign * hours
+
+
 def _parse_midnight_tz(raw: str) -> timezone | None:
     """解析「冷却至次日 00:00」的时区基准（每条规则的 tz 字段）
 
     "" / "local" -> None（使用本机时区）
-    "UTC" / "utc" -> timezone.utc
+    "UTC" / "utc" / "GMT" -> timezone.utc
+    "UTC+8" / "UTC +8" / "GMT-5.5" / "UTC+05:30" -> 相对 UTC 的偏移时区
     "+8" / "-5" / "5.5" 等数值 -> 相对 UTC 的偏移时区
     非法值抛 ValueError，由调用方转为可透传前端的错误信息
     """
     raw = (raw or "").strip()
     if raw == "" or raw.lower() == "local":
         return None
-    if raw.lower() == "utc":
+    low = raw.lower()
+    if low in ("utc", "gmt"):
         return timezone.utc
-    offset = float(raw)
+    m = _OFFSET_RE.match(low)
+    if m:
+        hours = _parse_offset_hours(m.group(1))
+        if not (-24 < hours < 24):
+            raise ValueError("时区偏移超出范围（应在 -24 ~ 24 之间）")
+        return timezone(timedelta(hours=hours))
+    # 容错：也支持单独写 "+8" / "-5" / "8" / "5.5" 等纯数字偏移
+    try:
+        offset = float(raw)
+    except ValueError:
+        raise ValueError("时区格式无效（应为 local / UTC / UTC±N，或偏移小时数如 -8、+9、+5.5）")
     if not (-24 < offset < 24):
         raise ValueError("时区偏移超出范围（应在 -24 ~ 24 之间）")
     return timezone(timedelta(hours=offset))

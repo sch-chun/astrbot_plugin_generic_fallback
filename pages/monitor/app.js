@@ -220,13 +220,42 @@ function describeAction(rule) {
   return `冷却 ${formatMinutes(rule.cooldown_minutes)}`;
 }
 
+function parseOffsetHours(num) {
+  // 与服务端 _parse_offset_hours 对齐：支持 +8 / -5 / 8 / 5.5 / 05:30（冒号=分钟）
+  let sign = 1;
+  let s = num;
+  if (s[0] === '+') s = s.slice(1);
+  else if (s[0] === '-') { sign = -1; s = s.slice(1); }
+  let hours;
+  if (s.indexOf(':') !== -1) {
+    const parts = s.split(':', 2);
+    hours = parseInt(parts[0], 10) + parseInt(parts[1], 10) / 60;
+  } else {
+    hours = parseFloat(s);
+  }
+  return sign * hours;
+}
+
 function validateTz(tz) {
-  // 与服务端 _parse_midnight_tz 对齐：留空/local/UTC 或偏移小时数（-24~24）
+  // 与服务端 _parse_midnight_tz 对齐：local / UTC / GMT / UTC±N / GMT±N / 纯数字偏移（-24~24）
   const v = (tz || '').trim();
-  if (v === '' || v.toLowerCase() === 'local' || v.toLowerCase() === 'utc') return null;
-  const offset = Number(v);
-  if (!Number.isFinite(offset) || offset <= -24 || offset >= 24) {
-    return '时区格式无效（应为 local / UTC / 偏移小时数，如 -8、+9、+5.5，范围 -24~24）';
+  if (v === '') return null;
+  const low = v.toLowerCase();
+  if (low === 'local' || low === 'utc' || low === 'gmt') return null;
+  // UTC/GMT 前缀 + 带符号数字（可含 :mm 或 .5）
+  const m = /^(?:utc|gmt)\s*([+-]?\d+(?::\d+)?(?:\.\d+)?)$/.exec(low);
+  let offset;
+  if (m) {
+    offset = parseOffsetHours(m[1]);
+  } else {
+    // 容错：单独写 "+8" / "-5" / "8" / "5.5"
+    offset = Number(v);
+  }
+  if (!Number.isFinite(offset)) {
+    return '时区格式无效（应为 local / UTC / GMT / UTC±N，或偏移小时数如 -8、+9、+5.5，范围 -24~24）';
+  }
+  if (offset <= -24 || offset >= 24) {
+    return '时区偏移超出范围（应在 -24 ~ 24 之间）';
   }
   return null;
 }
