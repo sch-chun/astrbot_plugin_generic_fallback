@@ -50,6 +50,7 @@ def _normalize_rule(rule: Any, index: int, seen_ids: set[str]) -> dict:
     if action not in RULE_ACTIONS:
         raise ValueError(f"第 {index} 条规则的动作必须是 {' / '.join(RULE_ACTIONS)} 之一")
     cooldown_minutes = None
+    tz = ""
     if action == "cooldown":
         cooldown_minutes = rule.get("cooldown_minutes", 10)
         if (
@@ -58,6 +59,16 @@ def _normalize_rule(rule: Any, index: int, seen_ids: set[str]) -> dict:
             or cooldown_minutes <= 0
         ):
             raise ValueError(f"第 {index} 条规则的冷却分钟数必须是大于 0 的数字")
+    elif action == "until_midnight":
+        tz = rule.get("tz", "")
+        if not isinstance(tz, str):
+            raise ValueError(f"第 {index} 条规则的时区必须是字符串")
+        tz = tz.strip()
+        if tz != "":
+            try:
+                _parse_midnight_tz(tz)
+            except ValueError as exc:
+                raise ValueError(f"第 {index} 条规则的时区无效：{exc}")
     rule_id = rule.get("id")
     if not isinstance(rule_id, str) or not rule_id.strip() or len(rule_id.strip()) > 64:
         rule_id = f"r-{uuid.uuid4().hex[:8]}"
@@ -72,6 +83,7 @@ def _normalize_rule(rule: Any, index: int, seen_ids: set[str]) -> dict:
         "threshold": threshold,
         "action": action,
         "cooldown_minutes": cooldown_minutes,
+        "tz": tz,
     }
 
 
@@ -94,31 +106,26 @@ def validate_rules(rules: Any) -> list[dict]:
 
 
 def _parse_midnight_tz(raw: str) -> timezone | None:
-    """解析「冷却至次日 00:00」的时区基准
+    """解析「冷却至次日 00:00」的时区基准（每条规则的 tz 字段）
 
     "" / "local" -> None（使用本机时区）
     "UTC" / "utc" -> timezone.utc
     "+8" / "-5" / "5.5" 等数值 -> 相对 UTC 的偏移时区
-    无法解析或偏移超范围时回退本机时区并记录告警
+    非法值抛 ValueError，由调用方转为可透传前端的错误信息
     """
     raw = (raw or "").strip()
     if raw == "" or raw.lower() == "local":
         return None
     if raw.lower() == "utc":
         return timezone.utc
-    try:
-        offset = float(raw)
-    except ValueError:
-        logger.warning(f"until_midnight_tz 配置无效（{raw!r}），已回退本机时区")
-        return None
+    offset = float(raw)
     if not (-24 < offset < 24):
-        logger.warning(f"until_midnight_tz 偏移超出范围（{raw!r}），已回退本机时区")
-        return None
+        raise ValueError("时区偏移超出范围（应在 -24 ~ 24 之间）")
     return timezone(timedelta(hours=offset))
 
 
 class ModelManager:
-    def __init__(self, cooldown_policy: Any | None = None, until_midnight_tz: str = ""):
+    def __init__(self, cooldown_policy: Any | None = None):
         # 代理服务跑在独立线程的事件循环里，监控面板（AstrBot 主循环）与代理请求
         # （线程循环）会并发操作本类。asyncio.Lock 会绑定到首个进入慢路径的事件循环，
         # 另一循环再竞争即抛跨循环 RuntimeError，且它本就无法提供跨线程互斥。
@@ -135,8 +142,6 @@ class ModelManager:
         self._cooldown_policy = normalize_cooldown_policy(
             DEFAULT_COOLDOWN_POLICY if cooldown_policy is None else cooldown_policy
         )
-        # 「冷却至次日 00:00」按此时区基准计算重置时刻；None 表示本机时区
-        self._until_midnight_tz = _parse_midnight_tz(until_midnight_tz)
 
     @property
     def cooldown_policy(self) -> list[list[float]]:
@@ -250,7 +255,7 @@ class ModelManager:
             self._disabled.add(provider_id)
             return "已禁用"
         if action == "until_midnight":
-            base_tz = self._until_midnight_tz
+            base_tz = _parse_midnight_tz(rule.get("tz", ""))
             ref_now = datetime.now(base_tz) if base_tz is not None else datetime.now()
             until_aware = datetime.combine(
                 ref_now.date() + timedelta(days=1), time.min, tzinfo=base_tz

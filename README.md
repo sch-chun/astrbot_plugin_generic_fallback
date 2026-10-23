@@ -37,7 +37,6 @@ git clone https://github.com/sch-chun/astrbot_plugin_generic_fallback.git
 | `proxy_api_key` | string | (空) | 代理层 API Key，留空则不验证 |
 | `empty_response_max_attempts` | int | `3` | 空响应重试次数，超过后回退到下一个 Provider 但不计入连续失败（流式下重试与回退均在首个内容字节发出前完成；全部 Provider 均不可用时返回 503，与非流式一致） |
 | `cooldown_policy` | list | `[[1, 1], [2, 5], [5, 30]]` | 连续失败冷却阶梯（分钟），详见下 |
-| `until_midnight_tz` | string | (空) | 自定义规则「冷却至次日 00:00」的时区基准：留空或 `local` 按本机时区；`UTC` 按世界标准时；填与 UTC 的偏移小时数（如 `-8`、`+9`、`+5.5`）按对应时区次日 00:00 重置额度。国外供应商额度常不在本机时区清零，按需设置 |
 | `virtual_models` | list | (见下) | 虚拟模型配置列表 |
 
 ### virtual_models 配置
@@ -75,7 +74,8 @@ git clone https://github.com/sch-chun/astrbot_plugin_generic_fallback.git
 
 - **匹配内容**：错误码或错误信息中的片段（如 `429`、`quota`），最长 100 字符；
 - **连续次数**：连续命中多少次后触发（正整数；一次成功会清零计数）；
-- **触发动作**：`冷却指定分钟`（分钟数支持小数）/ `冷却到第二天 00:00` / `禁用`。
+- **触发动作**：`冷却指定分钟`（分钟数支持小数）/ `冷却到第二天 00:00` / `禁用`；
+- **时区**（仅「冷却到第二天 00:00」动作）：留空或 `local` 按本机时区；`UTC` 按世界标准时；填与 UTC 的偏移小时数（如 `-8`、`+9`、`+5.5`）按对应时区次日 00:00 重置额度。回退链中不同供应商额度常不在同一时区清零，可给每条规则单独设置。
 
 行为说明：
 

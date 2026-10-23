@@ -128,7 +128,6 @@ class GenericFallbackProxyPlugin(Star):
         proxy_host = self.config.get("proxy_host", "127.0.0.1")
         proxy_api_key = self.config.get("proxy_api_key", "")
         empty_response_max_attempts = int(self.config.get("empty_response_max_attempts", 3))
-        until_midnight_tz = self.config.get("until_midnight_tz", "")
 
         # 冷却阶梯：[[连续失败次数, 冷却分钟数], ...]，非法配置回退到默认值
         try:
@@ -151,7 +150,7 @@ class GenericFallbackProxyPlugin(Star):
 
         # 4. 初始化模型管理器
         self._model_manager = ModelManager(
-            cooldown_policy=cooldown_policy, until_midnight_tz=until_midnight_tz
+            cooldown_policy=cooldown_policy
         )
 
         # 4.5 从 KV 加载持久化的自定义规则（读取失败不影响代理启动，仅丢失规则）
