@@ -554,6 +554,7 @@ h1 {
 /* JS 会按当前选项文字实测覆盖此宽度；128 为无 JS 时容纳最长选项的安全宽度 */
 #rule-action { width: 128px; }
 #rule-minutes { width: 68px; }
+#rule-tz { width: 88px; }
 
 .rules-footer {
   margin-top: 12px;

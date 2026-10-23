@@ -213,8 +213,22 @@ document.body.appendChild(actionMeasurer);
 
 function describeAction(rule) {
   if (rule.action === 'disable') return '禁用';
-  if (rule.action === 'until_midnight') return '冷却到第二天 00:00';
+  if (rule.action === 'until_midnight') {
+    const tz = rule.tz;
+    return tz ? `冷却到第二天 00:00（${tz}）` : '冷却到第二天 00:00';
+  }
   return `冷却 ${formatMinutes(rule.cooldown_minutes)}`;
+}
+
+function validateTz(tz) {
+  // 与服务端 _parse_midnight_tz 对齐：留空/local/UTC 或偏移小时数（-24~24）
+  const v = (tz || '').trim();
+  if (v === '' || v.toLowerCase() === 'local' || v.toLowerCase() === 'utc') return null;
+  const offset = Number(v);
+  if (!Number.isFinite(offset) || offset <= -24 || offset >= 24) {
+    return '时区格式无效（应为 local / UTC / 偏移小时数，如 -8、+9、+5.5，范围 -24~24）';
+  }
+  return null;
 }
 
 function isRulesDirty() {
@@ -233,7 +247,9 @@ function openRulesModal(providerId) {
   document.getElementById('rule-threshold').value = '';
   document.getElementById('rule-action').value = 'cooldown';
   document.getElementById('rule-minutes').value = '';
+  document.getElementById('rule-tz').value = '';
   syncMinutesVisibility();
+  syncTzVisibility();
   syncActionWidth();
   renderRulesList();
   openModalEl(document.getElementById('rules-modal'));
@@ -282,6 +298,11 @@ function syncMinutesVisibility() {
   document.getElementById('rule-minutes').hidden = document.getElementById('rule-action').value !== 'cooldown';
 }
 
+function syncTzVisibility() {
+  // 时区仅对「冷却到第二天」动作有意义，其余动作隐藏避免误填
+  document.getElementById('rule-tz').hidden = document.getElementById('rule-action').value !== 'until_midnight';
+}
+
 function syncActionWidth() {
   const sel = document.getElementById('rule-action');
   const option = sel.options[sel.selectedIndex];
@@ -308,6 +329,7 @@ function onRuleAddClick(event) {
   const thresholdRaw = document.getElementById('rule-threshold').value.trim();
   const action = document.getElementById('rule-action').value;
   const minutesRaw = document.getElementById('rule-minutes').value.trim();
+  const tzRaw = document.getElementById('rule-tz').value.trim();
 
   // 前端校验与服务端 validate_rules 保持一致，消息同样用中文
   if (!pattern) {
@@ -331,15 +353,26 @@ function onRuleAddClick(event) {
       return;
     }
   }
+  let tz = '';
+  if (action === 'until_midnight' && tzRaw !== '') {
+    const tzErr = validateTz(tzRaw);
+    if (tzErr) {
+      showModal(tzErr);
+      return;
+    }
+    tz = tzRaw;
+  }
 
   const rule = { pattern, threshold, action };
   if (action === 'cooldown') rule.cooldown_minutes = cooldownMinutes;
+  if (action === 'until_midnight') rule.tz = tz;
   rulesDraft.push(rule);
   renderRulesList();
 
   document.getElementById('rule-pattern').value = '';
   document.getElementById('rule-threshold').value = '';
   document.getElementById('rule-minutes').value = '';
+  document.getElementById('rule-tz').value = '';
   document.getElementById('rule-pattern').focus();
 }
 
@@ -493,6 +526,7 @@ async function init() {
   document.getElementById('rule-form').addEventListener('submit', onRuleAddClick);
   document.getElementById('rule-action').addEventListener('change', () => {
     syncMinutesVisibility();
+    syncTzVisibility();
     syncActionWidth();
   });
   document.getElementById('rules-modal').addEventListener('click', (event) => {
