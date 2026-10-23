@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-10-23
+
+### Fixed
+- 修复 Gemini Function Call 因缺少 `thought_signature` 被上游拒绝（`400 INVALID_ARGUMENT`）的问题。插件把 `LLMResponse` 转 OpenAI 格式时漏传 `tools_call_extra_content`（思考签名），导致下一轮回传函数调用缺签名；现在三处 `tool_calls` 构造（非流式响应、流式增量、流式 final chunk）均透传 `extra_content`，与 AstrBot 核心 `LLMResponse.to_openai_tool_calls` 保持一致
+
 ## [0.1.0] - 2026-10-19
 
 ### Fixed
