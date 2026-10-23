@@ -2,7 +2,7 @@
 import asyncio
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from datetime import time as clock_time
 
 import pytest
@@ -367,8 +367,25 @@ async def test_apply_rules_until_midnight():
 
     (item,) = (await manager.get_status())["cooldown_list"]
     until = datetime.fromisoformat(item["cooldown_until"])
-    assert until.time() == clock_time(0, 0)  # 次日 00:00
+    assert until.time() == clock_time(0, 0)  # 次日 00:00（本机时区）
     assert until.date() > date.today()
+
+
+async def test_apply_rules_until_midnight_tz():
+    # UTC 基准：冷却应在下一个 UTC 00:00 结束（按本地等价时刻存储）
+    manager = ModelManager(until_midnight_tz="UTC")
+    await manager.set_rules(
+        PROVIDER, [{"pattern": "timeout", "threshold": 1, "action": "until_midnight"}]
+    )
+    assert await manager.apply_rules(PROVIDER, "connection timeout") is True
+
+    (item,) = (await manager.get_status())["cooldown_list"]
+    until = datetime.fromisoformat(item["cooldown_until"])
+    now_utc = datetime.now(timezone.utc)
+    expected = datetime.combine(
+        now_utc.date() + timedelta(days=1), clock_time.min, tzinfo=timezone.utc
+    )
+    assert until == expected.astimezone().replace(tzinfo=None)
 
 
 async def test_apply_rules_without_rules_is_noop():

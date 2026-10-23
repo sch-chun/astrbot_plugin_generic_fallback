@@ -1,7 +1,7 @@
 import threading
 import uuid
 from collections import deque
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from astrbot.api import logger
@@ -93,8 +93,32 @@ def validate_rules(rules: Any) -> list[dict]:
     return [_normalize_rule(rule, index, seen_ids) for index, rule in enumerate(rules, start=1)]
 
 
+def _parse_midnight_tz(raw: str) -> timezone | None:
+    """解析「冷却至次日 00:00」的时区基准
+
+    "" / "local" -> None（使用本机时区）
+    "UTC" / "utc" -> timezone.utc
+    "+8" / "-5" / "5.5" 等数值 -> 相对 UTC 的偏移时区
+    无法解析或偏移超范围时回退本机时区并记录告警
+    """
+    raw = (raw or "").strip()
+    if raw == "" or raw.lower() == "local":
+        return None
+    if raw.lower() == "utc":
+        return timezone.utc
+    try:
+        offset = float(raw)
+    except ValueError:
+        logger.warning(f"until_midnight_tz 配置无效（{raw!r}），已回退本机时区")
+        return None
+    if not (-24 < offset < 24):
+        logger.warning(f"until_midnight_tz 偏移超出范围（{raw!r}），已回退本机时区")
+        return None
+    return timezone(timedelta(hours=offset))
+
+
 class ModelManager:
-    def __init__(self, cooldown_policy: Any | None = None):
+    def __init__(self, cooldown_policy: Any | None = None, until_midnight_tz: str = ""):
         # 代理服务跑在独立线程的事件循环里，监控面板（AstrBot 主循环）与代理请求
         # （线程循环）会并发操作本类。asyncio.Lock 会绑定到首个进入慢路径的事件循环，
         # 另一循环再竞争即抛跨循环 RuntimeError，且它本就无法提供跨线程互斥。
@@ -111,6 +135,8 @@ class ModelManager:
         self._cooldown_policy = normalize_cooldown_policy(
             DEFAULT_COOLDOWN_POLICY if cooldown_policy is None else cooldown_policy
         )
+        # 「冷却至次日 00:00」按此时区基准计算重置时刻；None 表示本机时区
+        self._until_midnight_tz = _parse_midnight_tz(until_midnight_tz)
 
     @property
     def cooldown_policy(self) -> list[list[float]]:
@@ -224,9 +250,15 @@ class ModelManager:
             self._disabled.add(provider_id)
             return "已禁用"
         if action == "until_midnight":
-            until = datetime.combine(datetime.now().date() + timedelta(days=1), time.min)
-            self._cooldown[provider_id] = until
-            return f"冷却至次日 00:00（{until:%Y-%m-%d %H:%M}）"
+            base_tz = self._until_midnight_tz
+            ref_now = datetime.now(base_tz) if base_tz is not None else datetime.now()
+            until_aware = datetime.combine(
+                ref_now.date() + timedelta(days=1), time.min, tzinfo=base_tz
+            )
+            # 以本地朴素时间存储，与 _cooldown 其余条目一致，统一比较与展示
+            self._cooldown[provider_id] = until_aware.astimezone().replace(tzinfo=None)
+            tz_label = "本机时区" if base_tz is None else "指定时区"
+            return f"冷却至次日 00:00（{tz_label}，重置时刻 {until_aware:%Y-%m-%d %H:%M}）"
         minutes = rule["cooldown_minutes"]
         self._cooldown[provider_id] = datetime.now() + timedelta(minutes=minutes)
         return f"冷却 {minutes:g} 分钟"
