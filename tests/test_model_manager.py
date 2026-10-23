@@ -10,6 +10,7 @@ import pytest
 from astrbot_plugin_generic_fallback.src.model_manager import (
     CALL_LOG_MAX_ENTRIES,
     ModelManager,
+    _parse_midnight_tz,
     validate_rules,
 )
 
@@ -397,6 +398,52 @@ async def test_apply_rules_until_midnight_tz_invalid():
             PROVIDER,
             [{"pattern": "timeout", "threshold": 1, "action": "until_midnight", "tz": "not-a-tz"}],
         )
+
+
+async def test_apply_rules_until_midnight_tz_offset():
+    # 每条规则可单独指定偏移时区：UTC+8 基准下冷却应在下一个 UTC+8 00:00 结束。
+    # 复刻 _fire_rule 的算法：以「目标时区自己的当前日期」+1 天作为次日，再投影回本地朴素时间。
+    manager = ModelManager()
+    await manager.set_rules(
+        PROVIDER,
+        [{"pattern": "timeout", "threshold": 1, "action": "until_midnight", "tz": "UTC+8"}],
+    )
+    assert await manager.apply_rules(PROVIDER, "connection timeout") is True
+
+    (item,) = (await manager.get_status())["cooldown_list"]
+    until = datetime.fromisoformat(item["cooldown_until"])
+    ref_now = datetime.now(timezone(timedelta(hours=8)))
+    until_aware = datetime.combine(
+        ref_now.date() + timedelta(days=1), clock_time.min, tzinfo=timezone(timedelta(hours=8))
+    )
+    expected = until_aware.astimezone().replace(tzinfo=None)
+    assert until == expected
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("", None),
+        ("local", None),
+        ("UTC", timezone.utc),
+        ("gmt", timezone.utc),
+        ("UTC+8", timezone(timedelta(hours=8))),
+        ("UTC +8", timezone(timedelta(hours=8))),
+        ("GMT-5.5", timezone(timedelta(hours=-5.5))),
+        ("UTC+05:30", timezone(timedelta(hours=5.5))),
+        ("+8", timezone(timedelta(hours=8))),
+        ("-5", timezone(timedelta(hours=-5))),
+        ("5.5", timezone(timedelta(hours=5.5))),
+    ],
+)
+def test_parse_midnight_tz_formats(raw, expected):
+    assert _parse_midnight_tz(raw) == expected
+
+
+@pytest.mark.parametrize("bad", ["not-a-tz", "UTC+24", "GMT-99", "UTC+8x", "abc"])
+def test_parse_midnight_tz_invalid(bad):
+    with pytest.raises(ValueError):
+        _parse_midnight_tz(bad)
 
 
 async def test_apply_rules_without_rules_is_noop():
