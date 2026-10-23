@@ -183,14 +183,21 @@ def create_proxy_router(
         tool_calls: list[dict] = []
         if llm_resp.tools_call_args:
             for i, args in enumerate(llm_resp.tools_call_args):
-                tool_calls.append({
-                    "id": llm_resp.tools_call_ids[i] if i < len(llm_resp.tools_call_ids) else f"call_{i}",
+                tc_id = llm_resp.tools_call_ids[i] if i < len(llm_resp.tools_call_ids) else f"call_{i}"
+                tool_call = {
+                    "id": tc_id,
                     "type": "function",
                     "function": {
                         "name": llm_resp.tools_call_name[i] if i < len(llm_resp.tools_call_name) else "",
                         "arguments": json.dumps(args, ensure_ascii=False),
                     },
-                })
+                }
+                # 透传 Gemini 等提供方的 extra_content（含 thought_signature）；
+                # 缺失会导致下一轮回传函数调用时被上游拒绝（400 INVALID_ARGUMENT）
+                extra = llm_resp.tools_call_extra_content.get(tc_id)
+                if extra:
+                    tool_call["extra_content"] = extra
+                tool_calls.append(tool_call)
         if tool_calls:
             message["tool_calls"] = tool_calls
 
@@ -235,14 +242,19 @@ def create_proxy_router(
         # 增量工具调用（某些 Provider 可能在增量中发送工具调用）
         if llm_resp.tools_call_args and not is_final:
             for i, args in enumerate(llm_resp.tools_call_args):
-                tool_calls.append({
-                    "id": llm_resp.tools_call_ids[i] if i < len(llm_resp.tools_call_ids) else f"call_{i}",
+                tc_id = llm_resp.tools_call_ids[i] if i < len(llm_resp.tools_call_ids) else f"call_{i}"
+                tool_call = {
+                    "id": tc_id,
                     "type": "function",
                     "function": {
                         "name": llm_resp.tools_call_name[i] if i < len(llm_resp.tools_call_name) else "",
                         "arguments": json.dumps(args, ensure_ascii=False),
                     },
-                })
+                }
+                extra = llm_resp.tools_call_extra_content.get(tc_id)
+                if extra:
+                    tool_call["extra_content"] = extra
+                tool_calls.append(tool_call)
             if tool_calls:
                 delta["tool_calls"] = tool_calls
 
@@ -426,14 +438,19 @@ def create_proxy_router(
                                 # 构建 tool_calls 列表
                                 tool_calls: list[dict] = []
                                 for i, args in enumerate(final_resp.tools_call_args):
-                                    tool_calls.append({
-                                        "id": final_resp.tools_call_ids[i] if i < len(final_resp.tools_call_ids) else f"call_{i}",
+                                    tc_id = final_resp.tools_call_ids[i] if i < len(final_resp.tools_call_ids) else f"call_{i}"
+                                    tool_call = {
+                                        "id": tc_id,
                                         "type": "function",
                                         "function": {
                                             "name": final_resp.tools_call_name[i] if i < len(final_resp.tools_call_name) else "",
                                             "arguments": json.dumps(args, ensure_ascii=False),
                                         },
-                                    })
+                                    }
+                                    extra = final_resp.tools_call_extra_content.get(tc_id)
+                                    if extra:
+                                        tool_call["extra_content"] = extra
+                                    tool_calls.append(tool_call)
 
                                 # 发送 tool_calls chunk
                                 tool_chunk = {
