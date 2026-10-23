@@ -276,7 +276,6 @@ def create_proxy_router(
     async def _call_provider(
         provider_id: str,
         body: dict,
-        log_resp: bool,
         requested_model: str,
         empty_response_max_attempts: int
     ) -> Optional[Response]:
@@ -355,14 +354,11 @@ def create_proxy_router(
                 openai_resp = _llm_response_to_openai_chat_completion(llm_resp, requested_model)
                 await model_manager.mark_success(provider_id)
                 await model_manager.record_call(provider_id, True)
-                if log_resp:
-                    logger.info(f"[响应日志] Provider={provider_id} 非流式响应: {json.dumps(openai_resp, ensure_ascii=False)[:500]}...")
                 return JSONResponse(content=openai_resp, status_code=200)
 
     async def _stream_with_fallback(
         provider_ids: list[str],
         body: dict,
-        log_resp: bool,
         requested_model: str,
         empty_response_max_attempts: int,
     ) -> FallbackStreamResponse:
@@ -374,7 +370,6 @@ def create_proxy_router(
         Args:
             provider_ids: 虚拟模型的 Provider 回退链，按优先级从高到低。
             body: 原始请求体。
-            log_resp: 是否打印上游响应日志。
             requested_model: 客户端请求的虚拟模型名。
             empty_response_max_attempts: 空响应原地重试次数。
 
@@ -513,8 +508,6 @@ def create_proxy_router(
                             # 发送结束标记
                             yield b"data: [DONE]\n\n"
 
-                            if log_resp and final_resp:
-                                logger.info(f"[响应日志] Provider={pid} 流式响应完成，内容长度 {len(final_resp.completion_text or '')}")
                             return
 
                         # 空流：原地重试；耗尽后记录失败（不冷却）并回退到下一个 Provider
@@ -588,13 +581,12 @@ def create_proxy_router(
 
         is_stream = body.get("stream", False)
         max_retries = config.empty_response_max_attempts
-        log_resp = config.log_response
 
         if is_stream:
             # 流式：Provider 回退在生成器内完成（响应头发出后无法切换 Provider），
             # 全部不可用时由 FallbackStreamResponse 改发 503
             return await _stream_with_fallback(
-                provider_ids, body, log_resp, requested_model, max_retries
+                provider_ids, body, requested_model, max_retries
             )
 
         for pid in provider_ids:
@@ -603,7 +595,7 @@ def create_proxy_router(
                 continue
 
             logger.info(f"尝试 Provider: {pid}")
-            resp = await _call_provider(pid, body, log_resp, requested_model, max_retries)
+            resp = await _call_provider(pid, body, requested_model, max_retries)
             if resp is not None:
                 return resp
 

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-10-24
+
+### Added
+- 自定义规则「冷却至次日 00:00」新增时区基准配置 `until_midnight_tz`：留空或 `local` 按本机时区；`UTC` 按世界标准时；填与 UTC 的偏移小时数（如 `-8`、`+9`、`+5.5`）按对应时区次日 00:00 重置额度，适配额度不在本机时区清零的国外供应商
+- 插件图标改用反色版（`#E0E1CC` 底 / `#1F1E33` 图形），与 TTS Enhancer、Watchdoc 同属一个双色家族；深色版保留为 `logo-dark.png` 备选
+
+### Removed
+- 移除「打印上游响应到日志」配置 `log_response`：AstrBot 本体 Debug 模式已打印完整响应，插件重复打印属冗余
+
 ## [0.1.1] - 2026-10-23
 
 ### Fixed

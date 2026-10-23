@@ -12,7 +12,6 @@ class ProxyConfig:
     proxy_host: str = "127.0.0.1"
     proxy_port: int = 3474
     proxy_api_key: str = ""
-    log_response: bool = False
     virtual_models: list[dict] = field(default_factory=list)
     empty_response_max_attempts: int = 3
     cooldown_policy: list[tuple[int, float]] = field(
