@@ -26,7 +26,7 @@ except ImportError:
     from quart import request as web_request
 
 from .src.config import DEFAULT_COOLDOWN_POLICY, ProxyConfig, normalize_cooldown_policy
-from .src.model_manager import ModelManager
+from .src.model_manager import ModelManager, CALL_LOG_MAX_ENTRIES
 from .src.api_proxy import create_proxy_router
 
 # 自定义规则在插件 KV 中的存储键
@@ -129,6 +129,11 @@ class GenericFallbackProxyPlugin(Star):
         proxy_api_key = self.config.get("proxy_api_key", "")
         empty_response_max_attempts = int(self.config.get("empty_response_max_attempts", 3))
 
+        # 每个 Provider 调用日志保留条数：非正数表示不保留日志
+        call_log_max_per_provider = max(
+            0, int(self.config.get("call_log_max_per_provider", CALL_LOG_MAX_ENTRIES))
+        )
+
         # 冷却阶梯：[[连续失败次数, 冷却分钟数], ...]，非法配置回退到默认值
         try:
             cooldown_policy = normalize_cooldown_policy(
@@ -150,7 +155,8 @@ class GenericFallbackProxyPlugin(Star):
 
         # 4. 初始化模型管理器
         self._model_manager = ModelManager(
-            cooldown_policy=cooldown_policy
+            cooldown_policy=cooldown_policy,
+            call_log_max_per_provider=call_log_max_per_provider,
         )
 
         # 4.5 从 KV 加载持久化的自定义规则（读取失败不影响代理启动，仅丢失规则）

@@ -28,6 +28,12 @@
     "default": [[1, 1], [2, 5], [5, 30]],
     "hint": "每项为 [连续失败次数, 冷却分钟数]，按失败次数升序。默认表示连续失败 1 次冷却 1 分钟、2-4 次冷却 5 分钟、5 次及以上冷却 30 分钟。次数低于首档阈值时按首档处理；也可填 JSON 字符串。非法配置会在日志报错并回退为默认值"
   },
+  "call_log_max_per_provider": {
+    "description": "每个 Provider 调用日志保留条数",
+    "type": "int",
+    "default": 200,
+    "hint": "调用日志按每个 Provider 各自保留最近 N 条、互不影响：调用多的 Provider 不会挤掉调用少的 Provider 的日志，避免后者在面板显示为空。设为 0 表示不保留日志"
+  },
   "virtual_models": {
     "description": "虚拟模型配置列表",
     "type": "template_list",

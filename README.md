@@ -37,6 +37,7 @@ git clone https://github.com/sch-chun/astrbot_plugin_generic_fallback.git
 | `proxy_api_key` | string | (空) | 代理层 API Key，留空则不验证 |
 | `empty_response_max_attempts` | int | `3` | 空响应重试次数，超过后回退到下一个 Provider 但不计入连续失败（流式下重试与回退均在首个内容字节发出前完成；全部 Provider 均不可用时返回 503，与非流式一致） |
 | `cooldown_policy` | list | `[[1, 1], [2, 5], [5, 30]]` | 连续失败冷却阶梯（分钟），详见下 |
+| `call_log_max_per_provider` | int | `200` | 每个 Provider 调用日志保留条数；各 Provider 独立保留最近 N 条、互不挤占，低流量 Provider 不会被高流量 Provider 挤出。设为 0 表示不保留日志 |
 | `virtual_models` | list | (见下) | 虚拟模型配置列表 |
 
 ### virtual_models 配置
@@ -127,7 +128,7 @@ curl http://127.0.0.1:3474/v1/status
 每个 Provider 卡片上还有**日志**按钮，点击可查看该 Provider 的近期调用记录：
 
 - 每条记录包含调用时间、成败与失败原因（如上游明确拒绝、连续多次返回空响应）；
-- 数据只保存在内存中，最多保留最近 200 条，插件重载或 AstrBot 重启后清空；
+- 数据只保存在内存中，按每个 Provider 各自保留最近 N 条（默认 200，可在 `call_log_max_per_provider` 配置调整，互不挤占），插件重载或 AstrBot 重启后清空；
 - 记录经 `GET /generic_fallback/logs?provider_id=...` 读取，该接口走 AstrBot 面板鉴权，需登录后访问。
 
 每个 Provider 卡片上还有**规则**按钮，点击可管理该 Provider 的自定义规则：
