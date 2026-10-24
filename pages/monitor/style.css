@@ -519,6 +519,22 @@ h1 {
   font-weight: 600;
 }
 
+/* 正在编辑的条目：左侧主色强调条 + 浅蓝底，与列表其余项区分 */
+.rule-item.editing {
+  background: rgba(59, 130, 246, 0.12);
+  border-left: 3px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  padding-left: 6px;
+}
+
+/* 时区格式灰字提示：仅「冷却到次日 0 点」动作时随 rule-tz 一同显示 */
+.rules-panel .rule-tz-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #888;
+}
+
 /* 添加规则表单：全部控件争取单行排布——匹配内容自适应占满，其余定宽 */
 .rule-form {
   display: flex;
@@ -554,7 +570,7 @@ h1 {
 /* JS 会按当前选项文字实测覆盖此宽度；128 为无 JS 时容纳最长选项的安全宽度 */
 #rule-action { width: 128px; }
 #rule-minutes { width: 68px; }
-#rule-tz { width: 88px; }
+#rule-tz { width: 72px; }
 
 .rules-footer {
   margin-top: 12px;
