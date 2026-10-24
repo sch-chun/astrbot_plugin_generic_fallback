@@ -10,9 +10,13 @@ All notable changes to this project will be documented in this file.
 - 监控面板自定义规则支持编辑已有规则：规则列表每条提供「编辑」入口，可回填表单后原地更新；「连续次数」输入框默认填 1；选中「冷却到次日 00:00」动作时以灰字给出时区格式说明（留空/local 按本机时区，UTC/GMT 世界标准时，或偏移小时数如 -8、+9、+5.5、UTC+08:30）
 - 新增 `call_log_max_per_provider` 配置（默认 200）：统一调整每个 Provider 的调用日志保留条数，设为 0 表示不保留日志
 
+### Changed
+- 解除禁用 Provider 时一并清空其调用日志（与冷却、连续失败次数、规则命中数一致）；新增 `clear_call_log(provider_id)` 显式清理接口，补上 `_call_log` 改为 `dict[str, deque]` 后缺失的清理路径
+
 ### Fixed
 - 修复调用少的 Provider 在监控面板「日志」显示为空的问题：此前所有 Provider 共用一条全局环形缓冲（上限 200），调用多的 Provider 会不断把调用少的 Provider 的记录挤出；现在改为每个 Provider 各自维护独立的日志缓冲，互不影响，低流量 Provider 也能完整留存近期调用记录
 - 修复编辑自定义规则会清空命中计数：编辑时整条替换丢失了原规则的稳定 id，服务端据此重新生成 id 并删除旧 id 的命中计数（表现为「改个错别字变 0/3」）；现在编辑时保留原 id，命中计数不再因保存而清零
+- 修复 `_fire_rule` 解析「冷却到次日 00:00」时区缺少异常兜底：正常情况下时区已由 `validate_rules` 保证合法，但绕过 `set_rules` 直接写入 `_rules` 的非法时区会在 `apply_rules` 中抛异常；现在解析失败回退本机时区并告警，动作照常执行
 
 ### Removed
 - 移除「打印上游响应到日志」配置 `log_response`：AstrBot 本体 Debug 模式已打印完整响应，插件重复打印属冗余

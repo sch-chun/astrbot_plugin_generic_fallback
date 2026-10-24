@@ -429,6 +429,24 @@ async def test_apply_rules_until_midnight_tz_invalid():
         )
 
 
+async def test_apply_rules_until_midnight_invalid_tz_does_not_crash():
+    # 兜底：即便有人绕过 set_rules 直接写 _rules 塞入非法 tz，apply_rules 也不应抛异常，
+    # 而是回退本机时区并照常冷却（对应 _fire_rule 里的 try/except）
+    manager = ModelManager()
+    manager._rules[PROVIDER] = [
+        {"id": "r-bad", "pattern": "timeout", "threshold": 1, "action": "until_midnight", "tz": "not-a-tz"}
+    ]
+
+    # 不应抛 ValueError；应正常触发冷却动作
+    assert await manager.apply_rules(PROVIDER, "connection timeout") is True
+
+    (item,) = (await manager.get_status())["cooldown_list"]
+    until = datetime.fromisoformat(item["cooldown_until"])
+    # 回退本机时区 → 次日本地 00:00
+    assert until.date() > date.today()
+    assert until.time() == clock_time(0, 0)
+
+
 async def test_apply_rules_until_midnight_tz_offset():
     # 每条规则可单独指定偏移时区：UTC+8 基准下冷却应在下一个 UTC+8 00:00 结束。
     # 复刻 _fire_rule 的算法：以「目标时区自己的当前日期」+1 天作为次日，再投影回本地朴素时间。
@@ -512,6 +530,22 @@ async def test_clear_all_resets_rule_hits():
     await manager.clear_all()
 
     assert await manager.apply_rules(PROVIDER, "429") is False
+
+
+async def test_set_disabled_clears_call_log():
+    manager = ModelManager()
+    await manager.record_call(PROVIDER, False, "timeout")
+    await manager.set_disabled(PROVIDER, True)
+    await manager.set_disabled(PROVIDER, False)
+    # 解除禁用时一并清空该 Provider 的旧调用日志（与冷却/连续失败/命中数一致）
+    assert await manager.get_call_log(PROVIDER) == []
+
+
+async def test_clear_call_log_removes_provider():
+    manager = ModelManager()
+    await manager.record_call(PROVIDER, True)
+    await manager.clear_call_log(PROVIDER)
+    assert await manager.get_call_log(PROVIDER) == []
 
 
 async def test_set_rules_replaces_and_prunes_stale_hits():

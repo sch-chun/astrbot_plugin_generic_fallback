@@ -226,7 +226,8 @@ class ModelManager:
                 self._cooldown.pop(provider_id, None)
                 self._fail_counts.pop(provider_id, None)
                 self._rule_hits.pop(provider_id, None)
-        logger.info(f"Provider {provider_id} 已{'禁用' if disabled else '解除禁用（同时清空冷却、连续失败次数与规则命中数）'}")
+                self._call_log.pop(provider_id, None)  # 复用时不再残留旧 Provider 的调用日志
+        logger.info(f"Provider {provider_id} 已{'禁用' if disabled else '解除禁用（同时清空冷却、连续失败次数、规则命中数与调用日志）'}")
 
     async def is_disabled(self, provider_id: str) -> bool:
         """检查 Provider 是否被手动禁用"""
@@ -240,6 +241,16 @@ class ModelManager:
             self._fail_counts.clear()
             self._rule_hits.clear()
         logger.info("已清空所有 Provider 冷却状态与规则命中数")
+
+    async def clear_call_log(self, provider_id: str) -> None:
+        """清除指定 Provider 的调用日志（提供 _call_log 的显式清理路径）
+
+        _call_log 是 dict[provider_id -> deque]，provider 从配置移除并经插件重载后
+        整个 ModelManager 会被重建、字典自然清空；但若同实例内需要主动丢弃某 Provider
+        的日志（如该 Provider 不再参与回退），可调用本方法，避免 deque 长期滞留。
+        """
+        with self._lock:
+            self._call_log.pop(provider_id, None)
 
     async def apply_rules(self, provider_id: str, reason: str) -> bool:
         """按自定义规则评估一次失败，连续命中达到阈值时执行对应动作
@@ -296,7 +307,17 @@ class ModelManager:
             self._disabled.add(provider_id)
             return "已禁用"
         if action == "until_midnight":
-            base_tz = _parse_midnight_tz(rule.get("tz", ""))
+            # tz 理论上已被 validate_rules / set_rules_map 校验过；这里再解析一次只是兜底，
+            # 防有人绕过 set_rules 直接写 _rules。解析失败不应让 apply_rules 抛异常，
+            # 退回本机时区并告警，动作照常执行。
+            try:
+                base_tz = _parse_midnight_tz(rule.get("tz", ""))
+            except ValueError:
+                logger.warning(
+                    f"Provider {provider_id} 规则「{rule['pattern']}」时区无效，"
+                    f"回退为本机时区：{rule.get('tz')}"
+                )
+                base_tz = None
             ref_now = datetime.now(base_tz) if base_tz is not None else datetime.now()
             until_aware = datetime.combine(
                 ref_now.date() + timedelta(days=1), time.min, tzinfo=base_tz
