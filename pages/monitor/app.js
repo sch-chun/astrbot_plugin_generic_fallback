@@ -9,6 +9,7 @@ let lastStatus = null;
 let rulesDraft = [];
 let rulesSnapshot = '';
 let rulesProviderId = null;
+let editingRuleIndex = -1; // >=0 表示正在编辑某条已有规则（按草稿下标定位，未保存的新增规则无稳定 id）
 
 async function fetchStatus() {
   try {
@@ -204,7 +205,7 @@ function closeLogModal() {
 
 // ---------- 自定义规则模态框 ----------
 // 动作下拉框宽度「顶着」当前选项文字：用同字体隐藏 span 实测文本宽，再加下拉箭头占用。
-// 短选项（冷却/禁用）自动收窄，省下的宽度让给匹配内容输入框；长选项（冷却到第二天）
+// 短选项（冷却/禁用）自动收窄，省下的宽度让给匹配内容输入框；长选项（冷却到次日 0 点）
 // 自动加宽到刚好容纳，不会被右侧下拉按钮截断
 const ACTION_ARROW_ALLOWANCE = 46; // 左内边距 8 + 边框 2 + 右下拉箭头与间距 + 余量
 const actionMeasurer = document.createElement('span');
@@ -215,7 +216,7 @@ function describeAction(rule) {
   if (rule.action === 'disable') return '禁用';
   if (rule.action === 'until_midnight') {
     const tz = rule.tz;
-    return tz ? `冷却到第二天 00:00（${tz}）` : '冷却到第二天 00:00';
+    return tz ? `冷却到次日 0 点（${tz}）` : '冷却到次日 0 点';
   }
   return `冷却 ${formatMinutes(rule.cooldown_minutes)}`;
 }
@@ -270,18 +271,27 @@ function openRulesModal(providerId) {
   // 深拷贝：草稿的增删不能直接写进 lastStatus，否则未保存也会被当成已保存
   rulesDraft = stored.map((rule) => ({ ...rule }));
   rulesSnapshot = JSON.stringify(rulesDraft);
+  applyRuleFormToAddMode();
+  openModalEl(document.getElementById('rules-modal'));
+}
 
-  document.getElementById('rules-title').textContent = `自定义规则：${providerId}`;
+// 把表单切回「新增」状态：清空输入、次数默认 1、动作回到冷却、按钮文案恢复
+function applyRuleFormToAddMode() {
+  editingRuleIndex = -1;
+  document.getElementById('rules-title').textContent = `自定义规则：${rulesProviderId || ''}`;
   document.getElementById('rule-pattern').value = '';
-  document.getElementById('rule-threshold').value = '';
+  document.getElementById('rule-threshold').value = '1';
   document.getElementById('rule-action').value = 'cooldown';
   document.getElementById('rule-minutes').value = '';
   document.getElementById('rule-tz').value = '';
+  const addBtn = document.getElementById('rule-add-btn');
+  addBtn.textContent = '添加';
+  const cancelBtn = document.getElementById('rule-cancel-btn');
+  cancelBtn.textContent = '清空';
   syncMinutesVisibility();
   syncTzVisibility();
   syncActionWidth();
   renderRulesList();
-  openModalEl(document.getElementById('rules-modal'));
 }
 
 function closeRulesModal(saved) {
@@ -307,16 +317,21 @@ function renderRulesList() {
     const hits = rule.hits || 0;
     // 达到阈值即下一次匹配命中时触发，高亮提醒
     const hot = hits >= rule.threshold;
-    html += `<div class="rule-item">
+    const editing = i === editingRuleIndex;
+    html += `<div class="rule-item${editing ? ' editing' : ''}">
       <div class="rule-info">
         <div class="rule-pattern">${escapeHtml(rule.pattern)}</div>
         <div class="rule-condition">连续 ${rule.threshold} 次 → ${escapeHtml(describeAction(rule))}</div>
       </div>
       <span class="rule-hits${hot ? ' hot' : ''}" title="已连续命中次数 / 触发阈值">${hits}/${rule.threshold}</span>
+      <button class="btn-outline rule-edit-btn" data-rule-index="${i}">编辑</button>
       <button class="btn-outline rule-delete-btn" data-rule-index="${i}">删除</button>
     </div>`;
   }
   list.innerHTML = html;
+  for (const btn of list.querySelectorAll('.rule-edit-btn')) {
+    btn.addEventListener('click', onRuleEditClick);
+  }
   for (const btn of list.querySelectorAll('.rule-delete-btn')) {
     btn.addEventListener('click', onRuleDeleteClick);
   }
@@ -328,8 +343,10 @@ function syncMinutesVisibility() {
 }
 
 function syncTzVisibility() {
-  // 时区仅对「冷却到第二天」动作有意义，其余动作隐藏避免误填
-  document.getElementById('rule-tz').hidden = document.getElementById('rule-action').value !== 'until_midnight';
+  // 时区仅对「冷却到次日 0 点」动作有意义，其余动作隐藏避免误填
+  const showTz = document.getElementById('rule-action').value === 'until_midnight';
+  document.getElementById('rule-tz').hidden = !showTz;
+  document.getElementById('rule-tz-hint').hidden = !showTz;
 }
 
 function syncActionWidth() {
@@ -348,7 +365,50 @@ function onRuleDeleteClick(event) {
   const index = Number(event.currentTarget.dataset.ruleIndex);
   if (Number.isInteger(index) && index >= 0 && index < rulesDraft.length) {
     rulesDraft.splice(index, 1);
+    // 正编辑的条目被删：退回新增态，避免悬空下标；其后的条目下标前移
+    if (editingRuleIndex === index) {
+      applyRuleFormToAddMode();
+    } else if (editingRuleIndex > index) {
+      editingRuleIndex -= 1;
+    }
     renderRulesList();
+  }
+}
+
+function onRuleEditClick(event) {
+  const index = Number(event.currentTarget.dataset.ruleIndex);
+  if (!(Number.isInteger(index) && index >= 0 && index < rulesDraft.length)) return;
+  const rule = rulesDraft[index];
+  editingRuleIndex = index;
+  document.getElementById('rules-title').textContent = `编辑规则：${rulesProviderId || ''}`;
+  document.getElementById('rule-pattern').value = rule.pattern || '';
+  document.getElementById('rule-threshold').value = String(rule.threshold != null ? rule.threshold : 1);
+  document.getElementById('rule-action').value = rule.action || 'cooldown';
+  document.getElementById('rule-minutes').value =
+    rule.action === 'cooldown' && rule.cooldown_minutes != null ? String(rule.cooldown_minutes) : '';
+  document.getElementById('rule-tz').value = rule.action === 'until_midnight' ? (rule.tz || '') : '';
+  document.getElementById('rule-add-btn').textContent = '更新';
+  document.getElementById('rule-cancel-btn').textContent = '放弃';
+  syncMinutesVisibility();
+  syncTzVisibility();
+  syncActionWidth();
+  renderRulesList(); // 让被编辑项高亮
+  document.getElementById('rule-pattern').focus();
+}
+
+function onRuleCancelClick() {
+  // 编辑态=放弃编辑；新增态=清空表单（文案与两态按钮约定一致）
+  if (editingRuleIndex >= 0) {
+    applyRuleFormToAddMode();
+  } else {
+    document.getElementById('rule-pattern').value = '';
+    document.getElementById('rule-threshold').value = '1';
+    document.getElementById('rule-action').value = 'cooldown';
+    document.getElementById('rule-minutes').value = '';
+    document.getElementById('rule-tz').value = '';
+    syncMinutesVisibility();
+    syncTzVisibility();
+    syncActionWidth();
   }
 }
 
@@ -395,13 +455,14 @@ function onRuleAddClick(event) {
   const rule = { pattern, threshold, action };
   if (action === 'cooldown') rule.cooldown_minutes = cooldownMinutes;
   if (action === 'until_midnight') rule.tz = tz;
-  rulesDraft.push(rule);
-  renderRulesList();
 
-  document.getElementById('rule-pattern').value = '';
-  document.getElementById('rule-threshold').value = '';
-  document.getElementById('rule-minutes').value = '';
-  document.getElementById('rule-tz').value = '';
+  if (editingRuleIndex >= 0) {
+    // 编辑：就地替换原规则，保留其在列表中的顺序
+    rulesDraft[editingRuleIndex] = rule;
+  } else {
+    rulesDraft.push(rule);
+  }
+  applyRuleFormToAddMode();
   document.getElementById('rule-pattern').focus();
 }
 
@@ -553,6 +614,7 @@ async function init() {
   document.getElementById('rules-close').addEventListener('click', () => closeRulesModal(false));
   document.getElementById('rules-save-btn').addEventListener('click', onRuleSaveClick);
   document.getElementById('rule-form').addEventListener('submit', onRuleAddClick);
+  document.getElementById('rule-cancel-btn').addEventListener('click', onRuleCancelClick);
   document.getElementById('rule-action').addEventListener('change', () => {
     syncMinutesVisibility();
     syncTzVisibility();

@@ -54,7 +54,7 @@
         <p class="rules-hint">
           失败原因包含匹配内容（不区分大小写）即记一次命中，连续命中达到阈值时触发对应动作；
           一次成功会清零计数。修改后需点「保存」生效。
-          「冷却到第二天」可单独指定时区（留空按本机），国外供应商额度常在其它时区清零。
+          「冷却到次日 0 点」可单独指定时区（留空按本机），国外供应商额度常在其它时区清零。
         </p>
         <div id="rules-list" class="rules-list"></div>
         <form id="rule-form" class="rule-form">
@@ -62,13 +62,15 @@
           <input id="rule-threshold" type="number" min="1" step="1" placeholder="次数" />
           <select id="rule-action">
             <option value="cooldown">冷却</option>
-            <option value="until_midnight">冷却到第二天</option>
+            <option value="until_midnight">冷却到次日 0 点</option>
             <option value="disable">禁用</option>
           </select>
           <input id="rule-minutes" type="number" min="0.1" step="0.1" placeholder="分钟" />
-          <input id="rule-tz" type="text" placeholder="时区" title="仅「冷却到第二天」动作：留空或 local=本机时区，UTC=世界标准时，偏移小时数如 -8/+9/+5.5" hidden />
+          <input id="rule-tz" type="text" placeholder="时区" title="仅「冷却到次日 0 点」动作：留空或 local=本机时区，UTC=世界标准时，偏移小时数如 -8/+9/+5.5" hidden />
           <button id="rule-add-btn" type="submit" class="btn-outline">添加</button>
+          <button id="rule-cancel-btn" type="button" class="btn-outline">清空</button>
         </form>
+        <p id="rule-tz-hint" class="rule-tz-hint" hidden>时区格式：留空/local=本机时区，UTC/GMT=世界标准时，偏移小时数如 -8、+9、+5.5、UTC+08:30</p>
         <div class="rules-footer">
           <button id="rules-save-btn" type="button" class="btn-primary">保存</button>
         </div>
