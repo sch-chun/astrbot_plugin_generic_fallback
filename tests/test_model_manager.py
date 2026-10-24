@@ -275,6 +275,35 @@ async def test_call_log_empty_for_unknown_provider():
     assert await manager.get_call_log("provider/ghost") == []
 
 
+async def test_call_log_is_per_provider_independent():
+    manager = ModelManager()
+    # 调用多的 Provider 持续写入，远超单家上限
+    for index in range(CALL_LOG_MAX_ENTRIES + 50):
+        await manager.record_call("busy/provider", True, f"c{index}")
+    # 调用少的 Provider 仅写入少量记录（且较早）
+    for index in range(5):
+        await manager.record_call("quiet/provider", False, f"q{index}")
+
+    quiet_logs = await manager.get_call_log("quiet/provider")
+    # 关键：调用少的 Provider 没有被调用多的 Provider 挤出
+    assert len(quiet_logs) == 5
+    # get_call_log 最新在前
+    assert [entry["reason"] for entry in quiet_logs] == [f"q{i}" for i in reversed(range(5))]
+
+    busy_logs = await manager.get_call_log("busy/provider")
+    assert len(busy_logs) == CALL_LOG_MAX_ENTRIES
+
+
+async def test_call_log_respects_configurable_cap():
+    manager = ModelManager(call_log_max_per_provider=3)
+    for index in range(10):
+        await manager.record_call(PROVIDER, True, f"c{index}")
+
+    logs = await manager.get_call_log(PROVIDER)
+    assert len(logs) == 3  # 仅保留最近 3 条
+    assert [entry["reason"] for entry in logs] == ["c9", "c8", "c7"]  # 最新在前
+
+
 # ---------- 自定义规则 ----------
 
 RULE_429 = {"pattern": "429", "threshold": 2, "action": "cooldown", "cooldown_minutes": 7}

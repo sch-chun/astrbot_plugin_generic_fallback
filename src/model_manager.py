@@ -13,7 +13,8 @@ from .config import (
     resolve_cooldown_minutes,
 )
 
-# 调用日志环形缓冲容量：仅供人工排查近期调用，够用即可，避免无限增长
+# 每个 Provider 调用日志环形缓冲的默认容量：仅供人工排查近期调用，够用即可。
+# 可在配置 call_log_max_per_provider 中按本插件统一覆盖。
 CALL_LOG_MAX_ENTRIES = 200
 
 # 自定义规则支持的动作：冷却指定分钟数 / 冷却至次日 00:00 / 禁用
@@ -158,7 +159,11 @@ def _parse_midnight_tz(raw: str) -> timezone | None:
 
 
 class ModelManager:
-    def __init__(self, cooldown_policy: Any | None = None):
+    def __init__(
+        self,
+        cooldown_policy: Any | None = None,
+        call_log_max_per_provider: int = CALL_LOG_MAX_ENTRIES,
+    ):
         # 代理服务跑在独立线程的事件循环里，监控面板（AstrBot 主循环）与代理请求
         # （线程循环）会并发操作本类。asyncio.Lock 会绑定到首个进入慢路径的事件循环，
         # 另一循环再竞争即抛跨循环 RuntimeError，且它本就无法提供跨线程互斥。
@@ -169,7 +174,10 @@ class ModelManager:
         self._cooldown: dict[str, datetime] = {}  # provider_id -> 冷却结束时间
         self._fail_counts: dict[str, int] = {}  # provider_id -> 连续失败次数
         self._disabled: set[str] = set()  # 被手动禁用的 provider_id
-        self._call_log: deque[dict] = deque(maxlen=CALL_LOG_MAX_ENTRIES)  # 近期调用记录
+        # 调用日志：每个 Provider 各自一条环形缓冲，互不挤占——调用多的 Provider
+        # 不会把调用少的 Provider 的日志挤出，避免后者在监控面板显示为空。
+        self._call_log_max = max(0, int(call_log_max_per_provider))
+        self._call_log: dict[str, deque[dict]] = {}
         self._rules: dict[str, list[dict]] = {}  # provider_id -> 自定义规则列表
         self._rule_hits: dict[str, dict[str, int]] = {}  # provider_id -> {规则 ID -> 连续命中次数}
         self._cooldown_policy = normalize_cooldown_policy(
@@ -415,7 +423,11 @@ class ModelManager:
             reason: 失败原因；成功时留空。
         """
         with self._lock:
-            self._call_log.append({
+            buf = self._call_log.get(provider_id)
+            if buf is None:
+                buf = deque(maxlen=self._call_log_max)
+                self._call_log[provider_id] = buf
+            buf.append({
                 "time": datetime.now().isoformat(timespec="seconds"),
                 "provider_id": provider_id,
                 "success": success,
@@ -429,10 +441,8 @@ class ModelManager:
             provider_id: Provider ID。
 
         Returns:
-            调用记录列表，元素含 time / success / reason 字段。
+            该 Provider 的调用记录列表，元素含 time / success / reason 字段。
+            各 Provider 各自保留最近 N 条，互不挤占。
         """
         with self._lock:
-            return [
-                entry for entry in reversed(self._call_log)
-                if entry["provider_id"] == provider_id
-            ]
+            return list(reversed(self._call_log.get(provider_id, deque())))
