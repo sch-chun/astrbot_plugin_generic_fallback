@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - 修复调用少的 Provider 在监控面板「日志」显示为空的问题：此前所有 Provider 共用一条全局环形缓冲（上限 200），调用多的 Provider 会不断把调用少的 Provider 的记录挤出；现在改为每个 Provider 各自维护独立的日志缓冲，互不影响，低流量 Provider 也能完整留存近期调用记录
+- 修复编辑自定义规则会清空命中计数：编辑时整条替换丢失了原规则的稳定 id，服务端据此重新生成 id 并删除旧 id 的命中计数（表现为「改个错别字变 0/3」）；现在编辑时保留原 id，命中计数不再因保存而清零
 
 ### Removed
 - 移除「打印上游响应到日志」配置 `log_response`：AstrBot 本体 Debug 模式已打印完整响应，插件重复打印属冗余

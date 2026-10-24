@@ -457,8 +457,9 @@ function onRuleAddClick(event) {
   if (action === 'until_midnight') rule.tz = tz;
 
   if (editingRuleIndex >= 0) {
-    // 编辑：就地替换原规则，保留其在列表中的顺序
-    rulesDraft[editingRuleIndex] = rule;
+    // 编辑：就地替换原规则，保留其在列表中的顺序与稳定 id；
+    // 否则服务端会重新生成 id、按旧 id 清掉的命中计数全部清零（实测「改个错别字变 0/3」）
+    rulesDraft[editingRuleIndex] = { ...rule, id: rulesDraft[editingRuleIndex].id };
   } else {
     rulesDraft.push(rule);
   }
