@@ -624,8 +624,10 @@ async function refreshDashboard() {
 // 初始化
 async function init() {
   await bridge.ready();
-  await applyPageBackground();
   await refreshDashboard();
+  // 不阻塞首屏：背景图可能数 MB，await 它会让面板一直白着等图。
+  // 去掉 await 后，图片加载完由内部 preload.onload 异步淡入，不影响主内容渲染。
+  applyPageBackground();
 
   document.getElementById('refresh-btn').addEventListener('click', refreshDashboard);
 
