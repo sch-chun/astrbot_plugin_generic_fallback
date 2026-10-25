@@ -22,6 +22,32 @@ async function fetchStatus() {
   }
 }
 
+// 监控页背景图：仅当配置了背景图时才注入并淡入；未配置则保持默认主题底色。
+// 与 watchdoc / TTS Enhancer 同款实现：预加载图片、解码完成后再提升透明度，避免半图闪烁。
+async function applyPageBackground() {
+  try {
+    const result = await bridge.apiGet('page-background');
+    const data = result?.data || result;
+    // 未配置背景图（data_url 为空）则不显示，保持默认主题底色
+    if (!data || !data.data_url) return;
+    const img = document.getElementById('page-bg-img');
+    if (!img) return;
+    const opacity = String(data.opacity ?? 0.2);
+    const blur = Number(data.blur ?? 0);
+    // 预加载图片，解码完成后再设置背景并提升透明度：CSS 中 #page-bg-img 默认 opacity 0
+    // 且带 transition，此处赋值即触发从 0 到目标值的淡入；图片加载失败则保持透明不显示
+    const preload = new Image();
+    preload.onload = () => {
+      img.style.backgroundImage = `url("${data.data_url}")`;
+      img.style.filter = blur > 0 ? `blur(${blur}px)` : 'none';
+      img.style.opacity = opacity;
+    };
+    preload.src = data.data_url;
+  } catch (e) {
+    console.warn('加载背景图失败:', e);
+  }
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
     '&': '&amp;',
@@ -598,6 +624,7 @@ async function refreshDashboard() {
 // 初始化
 async function init() {
   await bridge.ready();
+  await applyPageBackground();
   await refreshDashboard();
 
   document.getElementById('refresh-btn').addEventListener('click', refreshDashboard);

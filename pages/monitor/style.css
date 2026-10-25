@@ -7,6 +7,14 @@
   --success: #22c55e;
   --warning: #f59e0b;
   --danger: #ef4444;
+
+  /* 背景图 + 分层毛玻璃：配置背景图并淡入后，卡片/弹窗用半透明底色 + 模糊透出背景；
+     未配置背景图时 #page-bg 显示实色 --bg，面板透出实色，视觉与改动前一致 */
+  /* 浅色主题下 --bg 为白色，玻璃透明度需压低：40% 白 + 模糊已是明显磨砂透出，
+     避免叠在背景图上成为突兀白块；无图时与白底几乎不可见，视觉与改动前一致 */
+  --glass-bg: color-mix(in srgb, var(--bg) 40%, transparent);
+  --glass-panel-bg: color-mix(in srgb, var(--card-bg) 55%, transparent);
+  --glass-blur: blur(12px) saturate(140%);
 }
 
 [data-theme="dark"] {
@@ -18,13 +26,34 @@
   color-scheme: dark;
 }
 
+/* 全屏背景层：无图时显示实色 --bg（与改动前 body 背景一致），有图时由 JS 注入图片淡入。
+   固定铺满视口、置于内容之下（z-index:-1），内容浮于其上 */
+#page-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--bg);
+}
+
+#page-bg-img {
+  position: absolute;
+  inset: -30px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: transparent;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  will-change: opacity;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   margin: 0;
   padding: 20px;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
-  transition: background 0.3s, color 0.3s;
+  transition: color 0.3s;
 }
 
 #app {
@@ -128,11 +157,13 @@ h1 {
 }
 
 .virtual-model-section {
-  background: var(--card-bg);
+  background: var(--glass-panel-bg);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 18px;
   margin-bottom: 20px;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .virtual-name {
@@ -158,7 +189,7 @@ h1 {
 }
 
 .provider-card {
-  background: var(--bg);
+  background: var(--glass-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
@@ -167,6 +198,8 @@ h1 {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 /* 左侧信息列：名称/状态/元信息纵向流式排布 */
@@ -336,7 +369,7 @@ h1 {
 }
 
 .modal-panel {
-  background: var(--bg);
+  background: var(--glass-panel-bg);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 20px;
@@ -345,6 +378,8 @@ h1 {
   transform: translateY(8px) scale(0.97);
   opacity: 0;
   transition: transform 0.2s ease, opacity 0.2s ease;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 .modal.is-open .modal-panel {
   transform: none;
@@ -547,7 +582,7 @@ h1 {
 
 .rule-form input,
 .rule-form select {
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 75%, transparent);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -555,6 +590,8 @@ h1 {
   font-size: 13px;
   /* 定宽即实际占位（含内边距与边框），单行宽度预算才可预测 */
   box-sizing: border-box;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 .rule-form input:focus,
 .rule-form select:focus {
@@ -581,6 +618,7 @@ h1 {
 /* 减少动态效果偏好：淡入、错峰与按压反馈全部即时完成 */
 @media (prefers-reduced-motion: reduce) {
   #app,
+  #page-bg-img,
   .virtual-models.first-load .virtual-model-section,
   .spinner,
   .modal,

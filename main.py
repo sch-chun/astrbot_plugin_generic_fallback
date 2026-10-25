@@ -5,8 +5,12 @@ import asyncio
 import contextlib
 import socket
 import time
+import base64
+import hashlib
+import mimetypes
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import Response as _FastResponse
 import yaml
 from pathlib import Path
 
@@ -16,6 +20,7 @@ from quart.wrappers import Response
 
 from astrbot.api.star import Context, Star
 from astrbot.api import logger, AstrBotConfig
+from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
 # 兼容旧版 json_response
 try:
@@ -41,6 +46,82 @@ GRACEFUL_SHUTDOWN_TIMEOUT = 10
 # 一等就退，只有异常慢启动才会耗到上限，且不会在服务没起来时误打「已启动」日志
 STARTUP_WAIT_TIMEOUT = 2.0
 STARTUP_POLL_INTERVAL = 0.01
+
+
+def _build_page_background_response(config, data_dir) -> tuple[dict, str | None]:
+    """构造监控页背景图响应数据（纯函数，便于单测）。
+
+    仅当配置了背景图且文件可读时返回 data_url；否则 data_url 为空，前端不渲染背景。
+    图片以 base64 Data URL 返回，避免二进制穿桥与跨域/外链，保持离线可用。
+    路径解析后强制锁定在 data_dir 内，防止路径穿越；ETag 按图片字节 + 显示参数哈希，
+    便于浏览器条件请求复用已缓存的 base64。
+
+    Args:
+        config: 插件配置。
+        data_dir: 插件数据目录。
+
+    Returns:
+        (响应 dict, ETag 或 None) 二元组；未配置背景图或读取失败时 ETag 为 None。
+    """
+    empty = {"code": 0, "data": {"data_url": "", "opacity": 1.0, "blur": 0}}
+    if config is None:
+        return empty, None
+    background_files = config.get("page_background") or []
+    if not isinstance(background_files, list) or not background_files:
+        return empty, None
+
+    rel_path = background_files[0]
+    if not isinstance(rel_path, str) or not rel_path:
+        return empty, None
+
+    # 锁定在插件数据目录内，防止路径穿越
+    base = Path(data_dir).resolve()
+    target = (base / rel_path).resolve()
+    if target != base and base not in target.parents:
+        return empty, None
+
+    if not target.is_file():
+        return empty, None
+
+    try:
+        raw = target.read_bytes()
+    except OSError:
+        return empty, None
+
+    mime, _ = mimetypes.guess_type(target.name)
+    if not mime:
+        mime = "application/octet-stream"
+    data_url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+    opacity = config.get("page_background_opacity", 0.2)
+    blur = config.get("page_background_blur", 0)
+    # ETag 必须覆盖整个响应表示：图片字节 + 显示参数。只哈希文件字节时，
+    # 用户仅调透明度/模糊度（不换图）ETag 不变，304 会把旧参数继续发给前端
+    etag_material = b"|".join(
+        [raw, str(opacity).encode("utf-8"), str(blur).encode("utf-8")]
+    )
+    etag = f'"{hashlib.sha256(etag_material).hexdigest()[:16]}"'
+    return {"code": 0, "data": {"data_url": data_url, "opacity": opacity, "blur": blur}}, etag
+
+
+def _if_none_match_matches(if_none_match: str | None, etag: str) -> bool:
+    """按 RFC 7232 弱比较判断 If-None-Match 头是否命中 etag。
+
+    If-None-Match 语义上使用弱比较（弱验证器与强验证器等价），逐项剥离 W/ 前缀后比对。
+
+    Args:
+        if_none_match: 请求头 If-None-Match 的值，可为 None。
+        etag: 服务端生成的强 ETag（带引号的十六进制串）。
+
+    Returns:
+        命中返回 True，否则 False。
+    """
+    if not if_none_match:
+        return False
+    for candidate in if_none_match.split(","):
+        candidate = candidate.strip().removeprefix("W/")
+        if candidate == etag:
+            return True
+    return False
 
 
 class _MainLoopProxyServer(uvicorn.Server):
@@ -75,6 +156,9 @@ class GenericFallbackProxyPlugin(Star):
             except Exception as e:
                 logger.error(f"读取插件元数据失败: {e}")
         self._plugin_name = plugin_name
+        # 插件数据目录：AstrBot 的 file 类型配置上传后落在此目录，背景图相对路径据此解析。
+        # （Star 基类不提供该属性，与 watchdoc / TTS Enhancer 一致，自行拼出）
+        self.data_dir = Path(get_astrbot_plugin_data_path()) / self._plugin_name
 
     async def initialize(self) -> None:
         """初始化：读取配置，启动代理服务"""
@@ -192,6 +276,12 @@ class GenericFallbackProxyPlugin(Star):
             ["GET"],
             "获取指定 Provider 的近期调用记录"
         )
+        self.context.register_web_api(
+            f"/{self._plugin_name}/page-background",
+            self.page_background_handler,
+            ["GET"],
+            "获取监控页背景图"
+        )
 
         # 6. 创建 FastAPI 应用
         self._fastapi_app = FastAPI(title="Generic Fallback", version="1.0.0")
@@ -239,6 +329,22 @@ class GenericFallbackProxyPlugin(Star):
         logger.info(f"   虚拟模型数量: {len(self._virtual_models)}")
         for v in self._virtual_models:
             logger.info(f"   - {v.get('name')}: {len(v.get('provider_ids', []))} 个 Provider")
+
+    async def page_background_handler(self) -> Union[Response, JSONResponse]:
+        """监控页背景图：未配置时返回空 data_url，前端不渲染背景。
+
+        配置了背景图时附加 ETag 与 Cache-Control: private, no-cache：浏览器再次请求
+        自动携带 If-None-Match，文件未变更则返回 304，已存 base64 由 HTTP 缓存透明复用。
+        """
+        payload, etag = _build_page_background_response(self.config, self.data_dir)
+        if not etag:
+            return json_response(payload)
+        cache_headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
+        if _if_none_match_matches(web_request.headers.get("if-none-match"), etag):
+            return _FastResponse(status_code=304, headers=cache_headers)
+        response = json_response(payload)
+        response.headers.update(cache_headers)
+        return response
 
     async def status_handler(self) -> Union[Response, JSONResponse]:
         """返回当前状态"""

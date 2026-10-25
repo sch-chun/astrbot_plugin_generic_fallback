@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-10-25
+
+### Added
+- 监控面板背景图功能（对齐 Watchdoc / TTS Enhancer）：新增配置项 `page_background`（图片，限 png/jpg/jpeg/webp）、`page_background_opacity`（0–1，默认 0.2）、`page_background_blur`（0–30，默认 0）；后端 `GET /{plugin}/page-background` 返回 base64 Data URL，带 ETag（图片字节 + 透明度 + 模糊哈希）与 `If-None-Match` → 304，并对图片路径做穿越防护；前端预加载解码完成后淡入（0.6s），未配置时由 `#page-bg` 实色 `--bg` 兜底，视觉与改动前一致。卡片 / 弹窗用半透明底色 + 毛玻璃透出背景，顶栏保持透明
+
 ## [0.1.2] - 2026-10-24
 
 ### Added
