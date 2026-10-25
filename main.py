@@ -31,7 +31,7 @@ except ImportError:
     from quart import request as web_request
 
 from .src.config import DEFAULT_COOLDOWN_POLICY, ProxyConfig, normalize_cooldown_policy
-from .src.model_manager import ModelManager, CALL_LOG_MAX_ENTRIES
+from .src.model_manager import CALL_LOG_MAX_ENTRIES, ModelManager
 from .src.api_proxy import create_proxy_router
 
 # 自定义规则在插件 KV 中的存储键
@@ -119,6 +119,9 @@ def _if_none_match_matches(if_none_match: str | None, etag: str) -> bool:
         return False
     for candidate in if_none_match.split(","):
         candidate = candidate.strip().removeprefix("W/")
+        if candidate == "*":
+            # RFC 7232: If-None-Match: * 命中任何现有表示；资源无表示（etag 为空）时不命中
+            return etag is not None
         if candidate == etag:
             return True
     return False
