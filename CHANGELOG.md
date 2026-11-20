@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-11-20
+
+### Added
+- 四语 i18n 资源完整性测试：校验四语 JSON 可解析、叶子键集合完全一致、关键文案齐备且非空、日志原因文案保留 `{n}` 占位符、侧边栏标题长度不超限；并从 `app.js` 兜底字典与 `index.html` 静态属性动态提取前端实际引用的 69 个视图 key，逐一校验四语存在且非空，防止新增文案漏译
+
+### Fixed
+- 修复旧配置 `name` → `display_name` 迁移后残留旧字段的问题：迁移时移除 `name`，避免用户在窗口期内清空 `display_name` 后重启被旧值静默恢复
+- 修复空 `display_name` 会创建无名虚拟模型的问题：解析时跳过空名项，不再产生名字为空的虚拟模型；模板项 `display_name` 默认值恢复为 `my-fallback`，新增项即有有效名称
+
 ## [0.2.0] - 2026-11-20
 
 ### Added

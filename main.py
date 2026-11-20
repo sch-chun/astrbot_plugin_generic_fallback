@@ -173,20 +173,28 @@ class GenericFallbackProxyPlugin(Star):
             return
 
         # 一次性迁移：旧配置的字段名是 name，面板改版后统一为 display_name。
+        # 迁移后必须移除旧 name：否则用户在窗口期内把 display_name 清空时，
+        # 重启会命中 `name in v and not display_name` 把旧值静默恢复。
         # 内存里先归一化，再在配置对象支持时持久化（测试用普通 dict 无 save_config）。
         migrated = False
         for v in virtual_models_raw:
-            if isinstance(v, dict) and "name" in v and not v.get("display_name"):
+            if not isinstance(v, dict) or "name" not in v:
+                continue
+            if not v.get("display_name"):
                 v["display_name"] = v["name"]
-                migrated = True
+            v.pop("name", None)
+            migrated = True
         if migrated and callable(save_config := getattr(self.config, "save_config", None)):
             save_config()
 
         # 解析并过滤有效配置（至少有一个 provider_ids）
         self._virtual_models = []
         for v in virtual_models_raw:
-            # 兼容旧配置：面板改写 display_name 前，字段名曾是 name
-            name = v.get("display_name") or v.get("name", "")
+            # 旧字段已由上面的迁移移除，展示名只读 display_name
+            name = v.get("display_name", "")
+            if not name:
+                logger.warning("发现 display_name 为空的虚拟模型，已跳过")
+                continue
             provider_ids = v.get("provider_ids", [])
             if not provider_ids:
                 logger.warning(f"虚拟模型 '{name}' 的 provider_ids 为空，跳过")
