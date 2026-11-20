@@ -129,7 +129,24 @@ async def test_cleared_display_name_not_restored_after_migration(monkeypatch):
 
     assert config["virtual_models"][0]["display_name"] == ""
     assert "name" not in config["virtual_models"][0]
-    assert second._virtual_models[0]["name"] == ""
+    # 空名不得产生虚拟模型，也不得回退到旧值 legacy-vm
+    assert second._virtual_models == []
+
+
+async def test_initialize_skips_empty_display_name(monkeypatch):
+    """空 display_name 项必须跳过，不得创建名字为空的虚拟模型。"""
+    config = {
+        "virtual_models": [
+            {"display_name": "", "provider_ids": ["provider/a"]},
+            {"display_name": "valid-vm", "provider_ids": ["provider/b"]},
+        ],
+    }
+    plugin = make_plugin(config)
+    monkeypatch.setattr(plugin, "_start_uvicorn", lambda: True)
+
+    await plugin.initialize()
+
+    assert [v["name"] for v in plugin._virtual_models] == ["valid-vm"]
 
 
 async def test_initialize_prefers_display_name_over_legacy_name(monkeypatch):

@@ -192,6 +192,9 @@ class GenericFallbackProxyPlugin(Star):
         for v in virtual_models_raw:
             # 旧字段已由上面的迁移移除，展示名只读 display_name
             name = v.get("display_name", "")
+            if not name:
+                logger.warning("发现 display_name 为空的虚拟模型，已跳过")
+                continue
             provider_ids = v.get("provider_ids", [])
             if not provider_ids:
                 logger.warning(f"虚拟模型 '{name}' 的 provider_ids 为空，跳过")

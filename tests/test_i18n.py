@@ -4,12 +4,14 @@
 只做静态资源校验，不依赖 AstrBot 运行时的 i18n 加载器。
 """
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1]
 I18N_DIR = PLUGIN_DIR / ".astrbot-plugin" / "i18n"
+MONITOR_DIR = PLUGIN_DIR / "pages" / "monitor"
 LOCALES = ("zh-CN", "en-US", "ja-JP", "ru-RU")
 
 
@@ -96,6 +98,38 @@ def test_required_values_are_nonempty_strings(bundles, locale, key):
     """关键键的值必须是非空字符串，防止空翻译导致界面空白。"""
     value = _lookup(bundles[locale], key)
     assert isinstance(value, str) and value.strip(), f"{locale}.{key} 值为空"
+
+
+def _frontend_view_keys() -> set[str]:
+    """从监控页前端源码提取所有实际引用的 views.monitor.<key>。
+
+    - app.js：I18N 兜底字典的每个 key（tr(key) 经 bridge.t 读取同一路径）
+    - index.html：data-i18n / data-i18n-ph / data-i18n-title 静态属性
+    动态提取而非手写清单，前端新增文案却漏翻译时测试自动失败。
+    """
+    app_js = (MONITOR_DIR / "app.js").read_text(encoding="utf-8")
+    block = re.search(r"const I18N = \{(.*?)\n\};", app_js, re.S)
+    assert block, "app.js 中未找到 I18N 兜底字典"
+    keys = set(re.findall(r"^\s{2}(\w+):", block.group(1), re.M))
+
+    index_html = (MONITOR_DIR / "index.html").read_text(encoding="utf-8")
+    keys |= set(re.findall(r'data-i18n(?:-ph|-title)?="([^"]+)"', index_html))
+    return keys
+
+
+def test_frontend_view_keys_covered_by_i18n(bundles):
+    """前端引用的每个 key 必须在四语 views.monitor 中存在且非空。"""
+    view_keys = _frontend_view_keys()
+    # 提取到足够多的 key 才算正则生效，避免解析失效让测试空转通过
+    assert len(view_keys) >= 60, f"提取到的前端 i18n key 过少: {len(view_keys)}"
+    for locale in LOCALES:
+        monitor = bundles[locale]["views"]["monitor"]
+        for key in sorted(view_keys):
+            assert key in monitor, f"{locale}.views.monitor 缺少前端引用的 key: {key}"
+            value = monitor[key]
+            assert isinstance(value, str) and value.strip(), (
+                f"{locale}.views.monitor.{key} 值为空"
+            )
 
 
 @pytest.mark.parametrize("locale", LOCALES)
