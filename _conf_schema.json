@@ -47,7 +47,7 @@
           "display_name": {
             "description": "虚拟模型名称",
             "type": "string",
-            "default": "",
+            "default": "my-fallback",
             "hint": "客户端请求时使用；旧配置中的 name 字段仍兼容"
           },
           "provider_ids": {

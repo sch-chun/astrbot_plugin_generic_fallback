@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - 修复旧配置 `name` → `display_name` 迁移后残留旧字段的问题：迁移时移除 `name`，避免用户在窗口期内清空 `display_name` 后重启被旧值静默恢复
-- 修复空 `display_name` 会创建无名虚拟模型的问题：解析时跳过空名项，不再产生名字为空的虚拟模型
+- 修复空 `display_name` 会创建无名虚拟模型的问题：解析时跳过空名项，不再产生名字为空的虚拟模型；模板项 `display_name` 默认值恢复为 `my-fallback`，新增项即有有效名称
 
 ## [0.2.0] - 2026-11-20
 
