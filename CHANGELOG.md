@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-11-20
+
+### Added
+- 四语 i18n 资源完整性测试：校验四语 JSON 可解析、叶子键集合完全一致、关键文案齐备且非空、日志原因文案保留 `{n}` 占位符、侧边栏标题长度不超限，防止新增文案漏译或键名漂移
+
+### Fixed
+- 修复旧配置 `name` → `display_name` 迁移后残留旧字段的问题：迁移时移除 `name`，避免用户在窗口期内清空 `display_name` 后重启被旧值静默恢复
+
 ## [0.2.0] - 2026-11-20
 
 ### Added

@@ -98,13 +98,42 @@ async def test_initialize_migrates_legacy_name_field(monkeypatch):
     await plugin.initialize()
 
     assert config["virtual_models"][0]["display_name"] == "legacy-vm"
-    assert config["virtual_models"][0]["name"] == "legacy-vm"
+    # 旧字段必须移除，否则用户清空 display_name 后重启会被旧 name 静默恢复
+    assert "name" not in config["virtual_models"][0]
     assert config.saved == 1
     assert plugin._virtual_models[0]["name"] == "legacy-vm"
 
 
+async def test_cleared_display_name_not_restored_after_migration(monkeypatch):
+    """回归：迁移时移除旧 name，之后用户清空 display_name 重启不会被恢复。
+
+    复现用户报告的场景：旧配置只有 name → 迁移落盘 → 用户清空 display_name →
+    重启。若迁移后残留 name，重启会命中旧逻辑把 display_name 恢复成 legacy-vm。
+    """
+    config = {
+        "virtual_models": [{"name": "legacy-vm", "provider_ids": ["provider/a"]}],
+    }
+    first = make_plugin(config)
+    monkeypatch.setattr(first, "_start_uvicorn", lambda: True)
+    await first.initialize()
+
+    # 迁移完成：display_name 写入且旧 name 已移除
+    assert config["virtual_models"][0]["display_name"] == "legacy-vm"
+    assert "name" not in config["virtual_models"][0]
+
+    # 用户在面板清空 display_name 后重启
+    config["virtual_models"][0]["display_name"] = ""
+    second = make_plugin(config)
+    monkeypatch.setattr(second, "_start_uvicorn", lambda: True)
+    await second.initialize()
+
+    assert config["virtual_models"][0]["display_name"] == ""
+    assert "name" not in config["virtual_models"][0]
+    assert second._virtual_models[0]["name"] == ""
+
+
 async def test_initialize_prefers_display_name_over_legacy_name(monkeypatch):
-    """新字段优先于旧字段；两者共存时不误迁移。"""
+    """新字段优先于旧字段；两者共存时迁移仍会移除旧字段。"""
     config = {
         "virtual_models": [{
             "name": "old",
@@ -118,6 +147,7 @@ async def test_initialize_prefers_display_name_over_legacy_name(monkeypatch):
     await plugin.initialize()
 
     assert plugin._virtual_models[0]["name"] == "new"
+    assert "name" not in config["virtual_models"][0]
 
 
 async def test_initialize_uses_configured_policy(monkeypatch):
