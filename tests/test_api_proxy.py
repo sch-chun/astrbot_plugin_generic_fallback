@@ -202,6 +202,8 @@ async def test_stream_empty_response_retries_in_place():
     assert len(logs) == 1  # 原地重试只记一条结局
     assert logs[0]["success"] is False
     assert "空响应" in logs[0]["reason"]
+    assert logs[0]["reason_key"] == "stream_empty_response"
+    assert logs[0]["reason_params"] == {"n": 3}
 
 
 async def test_stream_empty_final_response_retries_in_place():
@@ -378,6 +380,7 @@ async def test_call_log_records_failure_reason():
     assert len(logs) == 1
     assert logs[0]["success"] is False
     assert "Connection timeout" in logs[0]["reason"]
+    assert logs[0]["reason_key"] == ""  # 上游异常无稳定键，面板显示原文
 
 
 async def test_call_log_records_no_cooldown_failure():
@@ -403,6 +406,8 @@ async def test_call_log_records_empty_response_exhaustion():
     assert len(logs) == 1  # 原地重试只记一条结局
     assert logs[0]["success"] is False
     assert "空响应" in logs[0]["reason"]
+    assert logs[0]["reason_key"] == "empty_response"
+    assert logs[0]["reason_params"] == {"n": 3}
 
 
 async def test_call_log_records_stream_success():

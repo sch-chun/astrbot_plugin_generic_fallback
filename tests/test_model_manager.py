@@ -254,6 +254,40 @@ async def test_call_log_entries_carry_timestamp():
     assert entry["time"]  # ISO 时间串，供面板直接展示
 
 
+async def test_call_log_carries_structured_reason_for_i18n():
+    """稳定键与参数随日志记录，原文保留；上游异常无键时留空。"""
+    manager = ModelManager()
+
+    await manager.record_call(
+        PROVIDER, False, "连续 3 次返回空响应",
+        reason_key="empty_response", reason_params={"n": 3},
+    )
+    await manager.record_call(PROVIDER, False, "Connection timeout")
+
+    logs = await manager.get_call_log(PROVIDER)
+    structured, raw = logs[1], logs[0]  # 最新在前
+
+    assert structured["reason"] == "连续 3 次返回空响应"
+    assert structured["reason_key"] == "empty_response"
+    assert structured["reason_params"] == {"n": 3}
+    assert raw["reason"] == "Connection timeout"
+    assert raw["reason_key"] == ""
+    assert raw["reason_params"] == {}
+
+
+async def test_reason_params_not_shared_between_entries():
+    """参数逐条拷贝，避免调用方复用字典污染历史记录。"""
+    manager = ModelManager()
+    params = {"n": 2}
+
+    await manager.record_call(PROVIDER, False, "r1", reason_key="empty_response", reason_params=params)
+    params["n"] = 99
+    await manager.record_call(PROVIDER, False, "r2", reason_key="empty_response", reason_params=params)
+
+    logs = await manager.get_call_log(PROVIDER)
+    assert [entry["reason_params"]["n"] for entry in logs] == [99, 2]
+
+
 async def test_call_log_is_capped():
     manager = ModelManager()
 

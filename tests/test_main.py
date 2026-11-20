@@ -79,6 +79,47 @@ async def test_initialize_registers_web_apis(monkeypatch):
     assert plugin._model_manager.cooldown_policy == DEFAULT_POLICY
 
 
+async def test_initialize_migrates_legacy_name_field(monkeypatch):
+    """旧配置用 name 字段，初始化时应迁移为 display_name 并落盘。"""
+    class ConfigWithSave(dict):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.saved = 0
+
+        def save_config(self):
+            self.saved += 1
+
+    config = ConfigWithSave({
+        "virtual_models": [{"name": "legacy-vm", "provider_ids": ["provider/a"]}],
+    })
+    plugin = make_plugin(config)
+    monkeypatch.setattr(plugin, "_start_uvicorn", lambda: True)
+
+    await plugin.initialize()
+
+    assert config["virtual_models"][0]["display_name"] == "legacy-vm"
+    assert config["virtual_models"][0]["name"] == "legacy-vm"
+    assert config.saved == 1
+    assert plugin._virtual_models[0]["name"] == "legacy-vm"
+
+
+async def test_initialize_prefers_display_name_over_legacy_name(monkeypatch):
+    """新字段优先于旧字段；两者共存时不误迁移。"""
+    config = {
+        "virtual_models": [{
+            "name": "old",
+            "display_name": "new",
+            "provider_ids": ["provider/a"],
+        }],
+    }
+    plugin = make_plugin(config)
+    monkeypatch.setattr(plugin, "_start_uvicorn", lambda: True)
+
+    await plugin.initialize()
+
+    assert plugin._virtual_models[0]["name"] == "new"
+
+
 async def test_initialize_uses_configured_policy(monkeypatch):
     plugin = make_plugin({
         "virtual_models": [{"name": "vm", "provider_ids": ["provider/a"]}],

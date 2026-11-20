@@ -3,13 +3,183 @@ const MODAL_ANIM_MS = 200;
 let refreshTimer = null;
 let firstLoadDone = false;
 let firstRenderDone = false;
-// 最近一次状态数据：规则模态框从这里读当前规则（含实时命中数）
+// 最近一次状态数据：规则模态框从这里读当前规则（含实时命中数），语言切换时据此重绘
 let lastStatus = null;
+// 缓存调用日志与标题参数，语言切换时重绘日志模态框
+let lastLogs = null;
+let lastLogProviderId = null;
+let lastUpdateTime = null;
 // 规则模态框草稿：打开时深拷贝自 lastStatus，保存时整单提交（replace 语义）
 let rulesDraft = [];
 let rulesSnapshot = '';
 let rulesProviderId = null;
 let editingRuleIndex = -1; // >=0 表示正在编辑某条已有规则（按草稿下标定位，未保存的新增规则无稳定 id）
+
+// ---------- i18n ----------
+// 所有用户可见文案经 bridge.t("views.monitor.<key>", 中文兜底) 读取。
+// 初始 ready 后 applyI18n() 一次，并注册 bridge.onContext(applyI18n) 响应面板语言切换。
+// 文本来源：插件 .astrbot-plugin/i18n/{locale}.json 的 views.monitor 段
+// （bridge 回退链 locale → zh-CN → en-US → 此处兜底）。
+const I18N = {
+  docTitle: '通用回退代理状态',
+  headerTitle: '回退代理监控',
+  refresh: '刷新',
+  ok: '确定',
+  close: '关闭',
+  logTitle: '调用日志',
+  logTitleFmt: '调用日志：{provider}',
+  rulesTitle: '自定义规则',
+  rulesTitleFmt: '自定义规则：{provider}',
+  editRuleTitleFmt: '编辑规则：{provider}',
+  rulesDirty: '未保存',
+  rulesHint: '失败原因包含匹配内容（不区分大小写）即记一次命中，连续命中达到阈值时触发对应动作；一次成功会清零计数。修改后需点「保存」生效。「冷却到次日 0 点」可单独指定时区（留空按本机），国外供应商额度常在其它时区清零。',
+  rulePatternPlaceholder: '匹配内容，如 429',
+  ruleThresholdPlaceholder: '次数',
+  actionCooldown: '冷却',
+  actionUntilMidnight: '冷却到次日 0 点',
+  actionDisable: '禁用',
+  actionCooldownFmt: '冷却 {minutes}',
+  actionUntilMidnightTz: '冷却到次日 0 点（{tz}）',
+  ruleMinutesPlaceholder: '分钟',
+  ruleTzPlaceholder: '时区',
+  ruleTzTitle: '仅「冷却到次日 0 点」动作：留空或 local=本机时区，UTC=世界标准时，偏移小时数如 -8/+9/+5.5',
+  ruleTzHint: '时区格式：留空/local=本机时区，UTC/GMT=世界标准时，偏移小时数如 -8、+9、+5.5、UTC+08:30',
+  ruleAdd: '添加',
+  ruleClear: '清空',
+  ruleUpdate: '更新',
+  ruleDiscard: '放弃',
+  rulesSave: '保存',
+  discardWarning: '已丢弃未保存的规则修改',
+  rulesEmpty: '暂无规则，可在下方添加',
+  ruleCondition: '连续 {n} 次 → {action}',
+  ruleHitsTitle: '已连续命中次数 / 触发阈值',
+  edit: '编辑',
+  deleteRule: '删除',
+  tzInvalidFormat: '时区格式无效（应为 local / UTC / GMT / UTC±N，或偏移小时数如 -8、+9、+5.5，范围 -24~24）',
+  tzOutOfRange: '时区偏移超出范围（应在 -24 ~ 24 之间）',
+  errPatternEmpty: '匹配内容不能为空',
+  errPatternTooLong: '匹配内容不能超过 100 个字符',
+  errThreshold: '连续次数必须是大于 0 的整数',
+  errCooldownMinutes: '冷却分钟数必须是大于 0 的数字',
+  errSaveFailed: '保存失败: ',
+  unknownError: '未知错误',
+  errFetchLogs: '获取调用日志失败: ',
+  errOperationFailed: '操作失败: ',
+  loadFailed: '加载失败，请重试',
+  lastUpdate: '最后更新: ',
+  minutesUnit: ' 分钟',
+  policyPrefix: '冷却阶梯: ',
+  policyEntry: '{n} 次→{minutes}',
+  policySep: '，',
+  loading: '加载中…',
+  noVirtualModels: '暂无虚拟模型配置',
+  providerCount: '{n} 个 Provider',
+  noProvider: '该虚拟模型未配置 Provider',
+  statusAvailable: '可用',
+  statusDisabled: '已禁用',
+  statusCooldown: '冷却中',
+  metaCooldown: '剩余 {n} 秒',
+  metaFail: '连续失败 {n} 次',
+  metaRule: '{n} 条自定义规则',
+  enable: '解禁',
+  disable: '禁用',
+  log: '日志',
+  rule: '规则',
+  noLogs: '暂无调用记录',
+  logSuccess: '成功',
+  logFail: '失败',
+  emptyResponse: '连续 {n} 次返回空响应',
+  streamEmptyResponse: '连续 {n} 次流式返回空响应',
+};
+
+// 稳定键 → i18n 键；上游异常无键时回退 reason 原文
+const REASON_KEYS = {
+  empty_response: 'emptyResponse',
+  stream_empty_response: 'streamEmptyResponse',
+};
+
+function fmt(template, params) {
+  let out = String(template);
+  if (params && typeof params === 'object') {
+    for (const [k, v] of Object.entries(params)) {
+      out = out.split('{' + k + '}').join(String(v));
+    }
+  }
+  return out;
+}
+
+function logReasonText(entry) {
+  const key = REASON_KEYS[entry.reason_key];
+  if (key && I18N[key] !== undefined) {
+    return fmt(tr(key), entry.reason_params);
+  }
+  return entry.reason || '';
+}
+
+function tr(key) {
+  if (bridge && typeof bridge.t === 'function') {
+    return bridge.t('views.monitor.' + key, I18N[key]);
+  }
+  return I18N[key];
+}
+
+function applyStaticI18n() {
+  for (const key of Object.keys(I18N)) {
+    I18N[key] = tr(key);
+  }
+  document.title = I18N.docTitle;
+  const locale = (bridge && typeof bridge.getLocale === 'function') ? bridge.getLocale() : 'zh-CN';
+  document.documentElement.lang = locale;
+  // 静态节点：文本 / placeholder / title
+  for (const el of document.querySelectorAll('[data-i18n]')) {
+    const k = el.getAttribute('data-i18n');
+    if (I18N[k] !== undefined) el.textContent = I18N[k];
+  }
+  for (const el of document.querySelectorAll('[data-i18n-ph]')) {
+    const k = el.getAttribute('data-i18n-ph');
+    if (I18N[k] !== undefined) el.placeholder = I18N[k];
+  }
+  for (const el of document.querySelectorAll('[data-i18n-title]')) {
+    const k = el.getAttribute('data-i18n-title');
+    if (I18N[k] !== undefined) el.title = I18N[k];
+  }
+}
+
+function applyI18n() {
+  applyStaticI18n();
+  // placeholder 文案随语言变化，需重测输入框宽度（语言切换即时生效）
+  syncInputWidths();
+  // 重绘由 JS 动态生成的区域（状态卡片 / 规则列表 / 日志），让语言切换即时生效
+  if (lastStatus) {
+    renderPolicy(lastStatus.cooldown_policy);
+    renderVirtualModels(
+      lastStatus.virtual_models,
+      lastStatus.cooldown_list,
+      lastStatus.disabled_list,
+      lastStatus.fail_counts,
+      lastStatus.custom_rules
+    );
+  }
+  if (lastUpdateTime) {
+    document.getElementById('last-update').textContent = I18N.lastUpdate + lastUpdateTime.toLocaleTimeString();
+  }
+  if (rulesProviderId) {
+    refreshRulesModalText();
+  }
+  if (lastLogProviderId) {
+    document.getElementById('log-title').textContent = I18N.logTitleFmt.replace('{provider}', lastLogProviderId);
+    if (lastLogs) fillLogModal(lastLogs);
+  }
+  syncActionWidth();
+}
+
+function refreshRulesModalText() {
+  document.getElementById('rules-title').textContent =
+    I18N[editingRuleIndex >= 0 ? 'editRuleTitleFmt' : 'rulesTitleFmt'].replace('{provider}', rulesProviderId || '');
+  document.getElementById('rule-add-btn').textContent = editingRuleIndex >= 0 ? I18N.ruleUpdate : I18N.ruleAdd;
+  document.getElementById('rule-cancel-btn').textContent = editingRuleIndex >= 0 ? I18N.ruleDiscard : I18N.ruleClear;
+  renderRulesList();
+}
 
 async function fetchStatus() {
   try {
@@ -61,7 +231,7 @@ function escapeHtml(value) {
 function formatMinutes(minutes) {
   const num = Number(minutes);
   const text = Number.isInteger(num) ? String(num) : num.toFixed(1);
-  return `${text} 分钟`;
+  return `${text}${I18N.minutesUnit}`;
 }
 
 function renderPolicy(policy) {
@@ -75,23 +245,23 @@ function renderPolicy(policy) {
 
   const parts = policy.map((entry) => {
     const [failures, minutes] = entry;
-    return `${failures} 次→${formatMinutes(minutes)}`;
+    return I18N.policyEntry.replace('{n}', failures).replace('{minutes}', formatMinutes(minutes));
   });
-  el.textContent = `冷却阶梯: ${parts.join('，')}`;
+  el.textContent = I18N.policyPrefix + parts.join(I18N.policySep);
 }
 
 function renderLoading(container) {
   container.innerHTML = `
     <div class="loading-box">
       <span class="spinner"></span>
-      <span>加载中…</span>
+      <span>${escapeHtml(I18N.loading)}</span>
     </div>`;
 }
 
 function renderVirtualModels(virtualModels, cooldownList, disabledList, failCounts, customRules) {
   const container = document.getElementById('virtual-models');
   if (!virtualModels || virtualModels.length === 0) {
-    container.innerHTML = '<p>暂无虚拟模型配置</p>';
+    container.innerHTML = `<p>${escapeHtml(I18N.noVirtualModels)}</p>`;
     return;
   }
 
@@ -115,12 +285,12 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
     html += `<div class="virtual-model-section">
       <div class="virtual-name">
         <span>${escapeHtml(v.name)}</span>
-        <span class="provider-count">${count} 个 Provider</span>
+        <span class="provider-count">${escapeHtml(I18N.providerCount.replace('{n}', count))}</span>
       </div>
       <div class="provider-grid">`;
 
     if (count === 0) {
-      html += `<p style="grid-column:1/-1; color:#888;">该虚拟模型未配置 Provider</p>`;
+      html += `<p style="grid-column:1/-1; color:#888;">${escapeHtml(I18N.noProvider)}</p>`;
     } else {
       for (const pid of providerIds) {
         const remaining = cooldownMap[pid] || 0;
@@ -130,25 +300,25 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
         const isCooldown = remaining > 0;
 
         let statusClass = 'available';
-        let statusText = '可用';
+        let statusText = I18N.statusAvailable;
         if (isDisabled) {
           statusClass = 'disabled';
-          statusText = '已禁用';
+          statusText = I18N.statusDisabled;
         } else if (isCooldown) {
           statusClass = 'cooldown';
-          statusText = '冷却中';
+          statusText = I18N.statusCooldown;
         }
 
         // 剩余冷却时间与连续失败次数合并一行，避免卡片高度参差不齐
         const metaParts = [];
         if (isCooldown && !isDisabled) {
-          metaParts.push('<span class="meta-cooldown">剩余 ' + remaining + ' 秒</span>');
+          metaParts.push('<span class="meta-cooldown">' + escapeHtml(I18N.metaCooldown.replace('{n}', remaining)) + '</span>');
         }
         if (failures > 0) {
-          metaParts.push('<span class="meta-fail">连续失败 ' + failures + ' 次</span>');
+          metaParts.push('<span class="meta-fail">' + escapeHtml(I18N.metaFail.replace('{n}', failures)) + '</span>');
         }
         if (ruleCount > 0) {
-          metaParts.push('<span class="meta-rule">' + ruleCount + ' 条自定义规则</span>');
+          metaParts.push('<span class="meta-rule">' + escapeHtml(I18N.metaRule.replace('{n}', ruleCount)) + '</span>');
         }
         const metaHtml = metaParts.length > 0
           ? `<div class="provider-meta">${metaParts.join('<span class="meta-sep">·</span>')}</div>`
@@ -162,16 +332,16 @@ function renderVirtualModels(virtualModels, cooldownList, disabledList, failCoun
               <div class="name" title="${escapeHtml(pid)}">${escapeHtml(pid)}</div>
               <div class="status">
                 <span class="dot ${statusClass}"></span>
-                <span>${statusText}</span>
+                <span>${escapeHtml(statusText)}</span>
               </div>
               ${metaHtml}
             </div>
             <div class="card-actions">
               <button class="btn-outline toggle-btn" data-pid="${escapeHtml(pid)}" data-action="${isDisabled ? 'enable' : 'disable'}">
-                ${isDisabled ? '解禁' : '禁用'}
+                ${escapeHtml(isDisabled ? I18N.enable : I18N.disable)}
               </button>
-              <button class="btn-outline log-btn" data-pid="${escapeHtml(pid)}">日志</button>
-              <button class="btn-outline rule-btn" data-pid="${escapeHtml(pid)}">规则</button>
+              <button class="btn-outline log-btn" data-pid="${escapeHtml(pid)}">${escapeHtml(I18N.log)}</button>
+              <button class="btn-outline rule-btn" data-pid="${escapeHtml(pid)}">${escapeHtml(I18N.rule)}</button>
             </div>
           </div>`;
       }
@@ -234,17 +404,26 @@ function closeLogModal() {
 // 短选项（冷却/禁用）自动收窄，省下的宽度让给匹配内容输入框；长选项（冷却到次日 0 点）
 // 自动加宽到刚好容纳，不会被右侧下拉按钮截断
 const ACTION_ARROW_ALLOWANCE = 46; // 左内边距 8 + 边框 2 + 右下拉箭头与间距 + 余量
-const actionMeasurer = document.createElement('span');
-actionMeasurer.style.cssText = 'position:absolute;top:-9999px;visibility:hidden;white-space:nowrap;font-size:13px;';
-document.body.appendChild(actionMeasurer);
+// 输入框占位宽度 = 文字实测宽 + 左右内边距 16 + 边框 2 + 少量余量
+const INPUT_CHROME_ALLOWANCE = 22;
+// number 输入框右侧有原生微调箭头，会再吃掉约 18px 的占位空间
+const NUMBER_SPINNER_ALLOWANCE = 18;
+const textMeasurer = document.createElement('span');
+textMeasurer.style.cssText = 'position:absolute;top:-9999px;visibility:hidden;white-space:nowrap;font-size:13px;';
+document.body.appendChild(textMeasurer);
+
+function measureTextWidth(text) {
+  textMeasurer.textContent = text || '';
+  return Math.ceil(textMeasurer.offsetWidth);
+}
 
 function describeAction(rule) {
-  if (rule.action === 'disable') return '禁用';
+  if (rule.action === 'disable') return I18N.actionDisable;
   if (rule.action === 'until_midnight') {
     const tz = rule.tz;
-    return tz ? `冷却到次日 0 点（${tz}）` : '冷却到次日 0 点';
+    return tz ? I18N.actionUntilMidnightTz.replace('{tz}', tz) : I18N.actionUntilMidnight;
   }
-  return `冷却 ${formatMinutes(rule.cooldown_minutes)}`;
+  return I18N.actionCooldownFmt.replace('{minutes}', formatMinutes(rule.cooldown_minutes));
 }
 
 function parseOffsetHours(num) {
@@ -279,10 +458,10 @@ function validateTz(tz) {
     offset = Number(v);
   }
   if (!Number.isFinite(offset)) {
-    return '时区格式无效（应为 local / UTC / GMT / UTC±N，或偏移小时数如 -8、+9、+5.5，范围 -24~24）';
+    return I18N.tzInvalidFormat;
   }
   if (offset <= -24 || offset >= 24) {
-    return '时区偏移超出范围（应在 -24 ~ 24 之间）';
+    return I18N.tzOutOfRange;
   }
   return null;
 }
@@ -304,16 +483,16 @@ function openRulesModal(providerId) {
 // 把表单切回「新增」状态：清空输入、次数默认 1、动作回到冷却、按钮文案恢复
 function applyRuleFormToAddMode() {
   editingRuleIndex = -1;
-  document.getElementById('rules-title').textContent = `自定义规则：${rulesProviderId || ''}`;
+  document.getElementById('rules-title').textContent = I18N.rulesTitleFmt.replace('{provider}', rulesProviderId || '');
   document.getElementById('rule-pattern').value = '';
   document.getElementById('rule-threshold').value = '1';
   document.getElementById('rule-action').value = 'cooldown';
   document.getElementById('rule-minutes').value = '';
   document.getElementById('rule-tz').value = '';
   const addBtn = document.getElementById('rule-add-btn');
-  addBtn.textContent = '添加';
+  addBtn.textContent = I18N.ruleAdd;
   const cancelBtn = document.getElementById('rule-cancel-btn');
-  cancelBtn.textContent = '清空';
+  cancelBtn.textContent = I18N.ruleClear;
   syncMinutesVisibility();
   syncTzVisibility();
   syncActionWidth();
@@ -323,7 +502,7 @@ function applyRuleFormToAddMode() {
 function closeRulesModal(saved) {
   // 丢弃未保存修改时明确告知，避免用户误以为已生效
   if (!saved && isRulesDirty()) {
-    showModal('已丢弃未保存的规则修改');
+    showModal(I18N.discardWarning);
   }
   closeModalEl(document.getElementById('rules-modal'));
 }
@@ -333,7 +512,7 @@ function renderRulesList() {
   document.getElementById('rules-dirty').hidden = !isRulesDirty();
 
   if (rulesDraft.length === 0) {
-    list.innerHTML = '<p class="rules-empty">暂无规则，可在下方添加</p>';
+    list.innerHTML = `<p class="rules-empty">${escapeHtml(I18N.rulesEmpty)}</p>`;
     return;
   }
 
@@ -344,14 +523,17 @@ function renderRulesList() {
     // 达到阈值即下一次匹配命中时触发，高亮提醒
     const hot = hits >= rule.threshold;
     const editing = i === editingRuleIndex;
+    const condition = I18N.ruleCondition
+      .replace('{n}', rule.threshold)
+      .replace('{action}', escapeHtml(describeAction(rule)));
     html += `<div class="rule-item${editing ? ' editing' : ''}">
       <div class="rule-info">
         <div class="rule-pattern">${escapeHtml(rule.pattern)}</div>
-        <div class="rule-condition">连续 ${rule.threshold} 次 → ${escapeHtml(describeAction(rule))}</div>
+        <div class="rule-condition">${condition}</div>
       </div>
-      <span class="rule-hits${hot ? ' hot' : ''}" title="已连续命中次数 / 触发阈值">${hits}/${rule.threshold}</span>
-      <button class="btn-outline rule-edit-btn" data-rule-index="${i}">编辑</button>
-      <button class="btn-outline rule-delete-btn" data-rule-index="${i}">删除</button>
+      <span class="rule-hits${hot ? ' hot' : ''}" title="${escapeHtml(I18N.ruleHitsTitle)}">${hits}/${rule.threshold}</span>
+      <button class="btn-outline rule-edit-btn" data-rule-index="${i}">${escapeHtml(I18N.edit)}</button>
+      <button class="btn-outline rule-delete-btn" data-rule-index="${i}">${escapeHtml(I18N.deleteRule)}</button>
     </div>`;
   }
   list.innerHTML = html;
@@ -379,8 +561,23 @@ function syncActionWidth() {
   const sel = document.getElementById('rule-action');
   const option = sel.options[sel.selectedIndex];
   if (!option) return;
-  actionMeasurer.textContent = option.text;
-  sel.style.width = `${Math.ceil(actionMeasurer.offsetWidth) + ACTION_ARROW_ALLOWANCE}px`;
+  sel.style.width = `${measureTextWidth(option.text) + ACTION_ARROW_ALLOWANCE}px`;
+}
+
+// 输入框按当前语言的 placeholder 实测宽度，避免英文 "Minutes"/"Timezone" 被右侧截断；
+// 上下限防止某语言文案过长挤掉匹配内容输入框，或过短导致数字输入不好点。
+function syncPlaceholderWidth(id, min, max) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const spinner = el.type === 'number' ? NUMBER_SPINNER_ALLOWANCE : 0;
+  const width = Math.min(max, Math.max(min, measureTextWidth(el.placeholder) + INPUT_CHROME_ALLOWANCE + spinner));
+  el.style.width = `${width}px`;
+}
+
+function syncInputWidths() {
+  syncPlaceholderWidth('rule-threshold', 76, 110);
+  syncPlaceholderWidth('rule-minutes', 88, 110);
+  syncPlaceholderWidth('rule-tz', 76, 130);
 }
 
 function onRuleClick(event) {
@@ -406,15 +603,15 @@ function onRuleEditClick(event) {
   if (!(Number.isInteger(index) && index >= 0 && index < rulesDraft.length)) return;
   const rule = rulesDraft[index];
   editingRuleIndex = index;
-  document.getElementById('rules-title').textContent = `编辑规则：${rulesProviderId || ''}`;
+  document.getElementById('rules-title').textContent = I18N.editRuleTitleFmt.replace('{provider}', rulesProviderId || '');
   document.getElementById('rule-pattern').value = rule.pattern || '';
   document.getElementById('rule-threshold').value = String(rule.threshold != null ? rule.threshold : 1);
   document.getElementById('rule-action').value = rule.action || 'cooldown';
   document.getElementById('rule-minutes').value =
     rule.action === 'cooldown' && rule.cooldown_minutes != null ? String(rule.cooldown_minutes) : '';
   document.getElementById('rule-tz').value = rule.action === 'until_midnight' ? (rule.tz || '') : '';
-  document.getElementById('rule-add-btn').textContent = '更新';
-  document.getElementById('rule-cancel-btn').textContent = '放弃';
+  document.getElementById('rule-add-btn').textContent = I18N.ruleUpdate;
+  document.getElementById('rule-cancel-btn').textContent = I18N.ruleDiscard;
   syncMinutesVisibility();
   syncTzVisibility();
   syncActionWidth();
@@ -446,25 +643,25 @@ function onRuleAddClick(event) {
   const minutesRaw = document.getElementById('rule-minutes').value.trim();
   const tzRaw = document.getElementById('rule-tz').value.trim();
 
-  // 前端校验与服务端 validate_rules 保持一致，消息同样用中文
+  // 前端校验与服务端 validate_rules 保持一致，消息同样走 i18n
   if (!pattern) {
-    showModal('匹配内容不能为空');
+    showModal(I18N.errPatternEmpty);
     return;
   }
   if (pattern.length > 100) {
-    showModal('匹配内容不能超过 100 个字符');
+    showModal(I18N.errPatternTooLong);
     return;
   }
   const threshold = Number(thresholdRaw);
   if (!thresholdRaw || !Number.isInteger(threshold) || threshold < 1) {
-    showModal('连续次数必须是大于 0 的整数');
+    showModal(I18N.errThreshold);
     return;
   }
   let cooldownMinutes = null;
   if (action === 'cooldown') {
     cooldownMinutes = Number(minutesRaw);
     if (!minutesRaw || !(cooldownMinutes > 0)) {
-      showModal('冷却分钟数必须是大于 0 的数字');
+      showModal(I18N.errCooldownMinutes);
       return;
     }
   }
@@ -511,11 +708,11 @@ async function onRuleSaveClick() {
       closeRulesModal(true);
       await refreshDashboard();
     } else {
-      showModal(`保存失败: ${(data && data.error) || '未知错误'}`);
+      showModal(I18N.errSaveFailed + ((data && data.error) || I18N.unknownError));
     }
   } catch (err) {
     console.error('保存自定义规则失败:', err);
-    showModal(`保存失败: ${err && err.message ? err.message : err}`);
+    showModal(I18N.errSaveFailed + (err && err.message ? err.message : err));
   } finally {
     btn.disabled = false;
   }
@@ -528,20 +725,22 @@ function formatLogTime(iso) {
 }
 
 function openLogModal(providerId) {
-  document.getElementById('log-title').textContent = `调用日志：${providerId}`;
+  lastLogProviderId = providerId;
+  document.getElementById('log-title').textContent = I18N.logTitleFmt.replace('{provider}', providerId);
   document.getElementById('log-list').innerHTML = `
     <div class="loading-box">
       <span class="spinner"></span>
-      <span>加载中…</span>
+      <span>${escapeHtml(I18N.loading)}</span>
     </div>`;
   openModalEl(document.getElementById('log-modal'));
 }
 
 function fillLogModal(logs) {
   const list = document.getElementById('log-list');
+  lastLogs = logs;
 
   if (!logs || logs.length === 0) {
-    list.innerHTML = '<p class="log-empty">暂无调用记录</p>';
+    list.innerHTML = `<p class="log-empty">${escapeHtml(I18N.noLogs)}</p>`;
     return;
   }
 
@@ -551,9 +750,9 @@ function fillLogModal(logs) {
     html += `<div class="log-item">
       <div class="log-head">
         <span class="log-time">${escapeHtml(formatLogTime(entry.time))}</span>
-        <span class="log-badge ${ok ? 'ok' : 'fail'}">${ok ? '成功' : '失败'}</span>
+        <span class="log-badge ${ok ? 'ok' : 'fail'}">${escapeHtml(ok ? I18N.logSuccess : I18N.logFail)}</span>
       </div>
-      ${entry.reason ? `<div class="log-reason">${escapeHtml(entry.reason)}</div>` : ''}
+      ${entry.reason ? `<div class="log-reason">${escapeHtml(logReasonText(entry))}</div>` : ''}
     </div>`;
   }
   list.innerHTML = html;
@@ -571,7 +770,7 @@ async function onLogClick(event) {
   } catch (err) {
     console.error('获取调用日志失败:', err);
     closeLogModal();
-    showModal(`获取调用日志失败: ${err && err.message ? err.message : err}`);
+    showModal(I18N.errFetchLogs + (err && err.message ? err.message : err));
   } finally {
     btn.disabled = false;
   }
@@ -589,7 +788,7 @@ async function onToggleClick(event) {
   } catch (err) {
     console.error('切换禁用状态失败:', err);
     btn.disabled = false;
-    showModal(`操作失败: ${err && err.message ? err.message : err}`);
+    showModal(I18N.errOperationFailed + (err && err.message ? err.message : err));
   }
 }
 
@@ -602,7 +801,7 @@ async function refreshDashboard() {
 
   const data = await fetchStatus();
   if (!data) {
-    container.innerHTML = '<p>加载失败，请重试</p>';
+    container.innerHTML = `<p>${escapeHtml(I18N.loadFailed)}</p>`;
     return;
   }
   firstLoadDone = true;
@@ -617,13 +816,18 @@ async function refreshDashboard() {
     data.custom_rules
   );
 
-  const now = new Date();
-  document.getElementById('last-update').textContent = `最后更新: ${now.toLocaleTimeString()}`;
+  lastUpdateTime = new Date();
+  document.getElementById('last-update').textContent = I18N.lastUpdate + lastUpdateTime.toLocaleTimeString();
 }
 
 // 初始化
 async function init() {
   await bridge.ready();
+  // 首次注入 i18n（bridge context 在 ready 后可用），并订阅语言切换
+  applyI18n();
+  if (bridge && typeof bridge.onContext === 'function') {
+    bridge.onContext(applyI18n);
+  }
   await refreshDashboard();
   // 不阻塞首屏：背景图可能数 MB，await 它会让面板一直白着等图。
   // 去掉 await 后，图片加载完由内部 preload.onload 异步淡入，不影响主内容渲染。

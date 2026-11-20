@@ -1,0 +1,137 @@
+{
+  "metadata": {
+    "display_name": "Generic Fallback",
+    "short_desc": "Generic fallback plugin: combine multiple provider fallback chains into a virtual model for AstrBot and other plugins",
+    "desc": "Generic fallback plugin. Configure virtual models composed of multiple provider fallback chains for AstrBot itself and other plugins. Provides OpenAI-compatible proxy endpoints, a cooldown ladder, manual disable, call logs, and a monitoring panel with custom rules."
+  },
+  "config": {
+    "proxy_port": {
+      "description": "Proxy listen port"
+    },
+    "proxy_host": {
+      "description": "Proxy listen address",
+      "hint": "Keep 127.0.0.1 (local only); use 0.0.0.0 for external access"
+    },
+    "proxy_api_key": {
+      "description": "Proxy API Key",
+      "hint": "Optional. When set, clients must send this key in the Authorization header"
+    },
+    "empty_response_max_attempts": {
+      "description": "Empty-response retry attempts",
+      "hint": "If a provider returns an empty response, retry it this many times before moving to the next provider. Empty-response detection currently supports non-streaming only"
+    },
+    "cooldown_policy": {
+      "description": "Consecutive-failure cooldown ladder",
+      "hint": "Each entry is [consecutive failures, cooldown minutes] in ascending failure order. The default means 1 failure = 1 min, 2-4 = 5 min, 5+ = 30 min. Below the first threshold uses the first tier. A JSON string is also accepted"
+    },
+    "call_log_max_per_provider": {
+      "description": "Log entries kept per provider",
+      "hint": "Logs are kept per provider independently (latest N each). Set to 0 to disable log retention"
+    },
+    "virtual_models": {
+      "description": "Virtual model list",
+      "hint": "Each virtual model corresponds to one provider fallback chain",
+      "templates": {
+        "default": {
+          "name": "Fallback virtual model",
+          "hint": "Configure a model name exposed to clients and its provider fallback list",
+          "display_name": {
+            "description": "Virtual model name",
+            "hint": "Used by clients when requesting; the legacy name field is still supported"
+          },
+          "provider_ids": {
+            "description": "Fallback-chain providers",
+            "hint": "In priority order; select at least one provider"
+          }
+        }
+      }
+    },
+    "page_background": {
+      "description": "Monitoring page background",
+      "hint": "Set a background image for the proxy monitoring page; leave empty to show none. Single image only. Keep the file small (a few MB) to avoid slow page loads"
+    },
+    "page_background_opacity": {
+      "description": "Background opacity",
+      "hint": "Background opacity (0 fully transparent, 1 fully opaque); only applies when a background image is set"
+    },
+    "page_background_blur": {
+      "description": "Background blur",
+      "hint": "Background blur radius (pixels); only applies when a background image is set"
+    }
+  },
+  "views": {
+    "monitor": {
+      "title": "Fallback Monitor",
+      "description": "View cooldown status, consecutive failure counts, and virtual model configuration for each provider.",
+      "docTitle": "Generic Fallback Proxy Status",
+      "headerTitle": "Fallback Proxy Monitor",
+      "refresh": "Refresh",
+      "ok": "OK",
+      "close": "Close",
+      "logTitle": "Call logs",
+      "logTitleFmt": "Call logs: {provider}",
+      "rulesTitle": "Custom rules",
+      "rulesTitleFmt": "Custom rules: {provider}",
+      "editRuleTitleFmt": "Edit rules: {provider}",
+      "rulesDirty": "Unsaved",
+      "rulesHint": "A failure reason containing the match text (case-insensitive) counts as one hit; reaching the threshold on consecutive hits triggers the chosen action. One success resets the counter. Click Save to apply changes. \"Cooldown until midnight\" supports its own timezone (blank = local), since foreign providers often reset quotas in other timezones.",
+      "rulePatternPlaceholder": "Match text, e.g. 429",
+      "ruleThresholdPlaceholder": "Count",
+      "actionCooldown": "Cooldown",
+      "actionUntilMidnight": "Cooldown until midnight",
+      "actionDisable": "Disable",
+      "actionCooldownFmt": "Cooldown {minutes}",
+      "actionUntilMidnightTz": "Cooldown until midnight ({tz})",
+      "ruleMinutesPlaceholder": "Minutes",
+      "ruleTzPlaceholder": "Timezone",
+      "ruleTzTitle": "Only for the \"Cooldown until midnight\" action: blank or local = local timezone, UTC = universal time, offset hours such as -8/+9/+5.5",
+      "ruleTzHint": "Timezone format: blank/local = local timezone, UTC/GMT = universal time, offset hours such as -8, +9, +5.5, UTC+08:30",
+      "ruleAdd": "Add",
+      "ruleClear": "Clear",
+      "ruleUpdate": "Update",
+      "ruleDiscard": "Discard",
+      "rulesSave": "Save",
+      "discardWarning": "Discarded unsaved rule changes",
+      "rulesEmpty": "No rules yet. Add one below.",
+      "ruleCondition": "{n} consecutive hits → {action}",
+      "ruleHitsTitle": "Consecutive hits / trigger threshold",
+      "edit": "Edit",
+      "deleteRule": "Delete",
+      "tzInvalidFormat": "Invalid timezone format (use local / UTC / GMT / UTC±N, or offset hours such as -8, +9, +5.5, range -24~24)",
+      "tzOutOfRange": "Timezone offset out of range (should be between -24 and 24)",
+      "errPatternEmpty": "Match text cannot be empty",
+      "errPatternTooLong": "Match text cannot exceed 100 characters",
+      "errThreshold": "Count must be an integer greater than 0",
+      "errCooldownMinutes": "Cooldown minutes must be a number greater than 0",
+      "errSaveFailed": "Save failed: ",
+      "unknownError": "Unknown error",
+      "errFetchLogs": "Failed to fetch call logs: ",
+      "errOperationFailed": "Operation failed: ",
+      "loadFailed": "Failed to load. Please retry.",
+      "lastUpdate": "Last updated: ",
+      "minutesUnit": " min",
+      "policyPrefix": "Cooldown ladder: ",
+      "policyEntry": "{n}× → {minutes}",
+      "policySep": ", ",
+      "loading": "Loading…",
+      "noVirtualModels": "No virtual models configured",
+      "providerCount": "{n} provider(s)",
+      "noProvider": "This virtual model has no providers",
+      "statusAvailable": "Available",
+      "statusDisabled": "Disabled",
+      "statusCooldown": "Cooling down",
+      "metaCooldown": "{n}s remaining",
+      "metaFail": "{n} consecutive failures",
+      "metaRule": "{n} custom rules",
+      "enable": "Enable",
+      "disable": "Disable",
+      "log": "Logs",
+      "rule": "Rules",
+      "noLogs": "No call records",
+      "logSuccess": "Success",
+      "logFail": "Failure",
+      "emptyResponse": "Empty response ×{n} in a row",
+      "streamEmptyResponse": "Empty streamed response ×{n} in a row"
+    }
+  }
+}

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-11-20
+
+### Added
+- 四语国际化（简体中文 / English / 日本語 / Русский）：新增 `.astrbot-plugin/i18n/{zh-CN,en-US,ja-JP,ru-RU}.json`，覆盖插件名与描述、全部配置项文案、监控面板全部可见文本；AstrBot 面板按当前语言自动加载。监控页通过 `bridge.t()` / `onContext()` 即时切换语言，无需刷新页面，语言切换时状态卡片、规则列表与日志弹窗同步重绘
+- 四语 README：`docs/{en,ja,ru}/README.md`，根 README 增加语言导航；各语 README 章节结构一一对应
+- 调用日志的失败原因支持双语展示：插件自造的两条固定原因（`empty_response` / `stream_empty_response`）带稳定键与参数写入日志，面板按当前语言渲染（如 `Empty response ×3 in a row`）；上游异常原文照显。规则匹配与冷却判定继续吃原文，用户已配置的中文 pattern 无需改动
+
+### Changed
+- 虚拟模型配置项 `name` 更名为 `display_name`（对齐 AstrBot 面板模板 item 的 i18n 键约定，修复英文界面下「虚拟模型名称」及 hint 回退中文的问题）；旧配置中的 `name` 在初始化时自动迁移为 `display_name` 并落盘，内部模型名与 API 契约不变
+- 配置项文案精简：`cooldown_policy` 标签去掉「（分钟）」、hint 去掉非法配置回退说明；`call_log_max_per_provider` 改为「单 Provider 日志保留条数」并简化 hint，其余语言同步
+- 英/日/俄监控页侧边栏标题缩短为 `Fallback Monitor` / `フォールバック監視` / `Монитор фолбэка`，避免 AstrBot 侧边栏默认宽度下显示不全；页面内完整标题保留
+
+### Fixed
+- 修复英文界面下规则表单 `Minutes` / `Timezone` 占位被输入框右侧截断的问题：输入框按当前语言 placeholder 实测宽度（数字框额外预留微调箭头空间），语言切换即时重测
+- 修复「冷却到次日 0 点」动作下「清空」按钮被挤到下一行的问题：规则弹窗加宽、可伸缩的匹配框让位给定宽控件，两个操作按钮成组靠右
+
 ## [0.1.3] - 2026-10-25
 
 ### Added

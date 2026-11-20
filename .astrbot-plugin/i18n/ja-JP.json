@@ -1,0 +1,137 @@
+{
+  "metadata": {
+    "display_name": "Generic Fallback",
+    "short_desc": "複数の Provider フォールバックチェーンを仮想モデルに統合し、本体や他のプラグインから利用できる汎用フォールバックプラグイン",
+    "desc": "複数の Provider フォールバックチェーンから成る仮想モデルを設定し、本体や他のプラグインから利用できる汎用フォールバックプラグインです。OpenAI 互換プロキシ、クールダウン段階、手動無効化、呼び出しログ、カスタムルール付き監視パネルを提供します。"
+  },
+  "config": {
+    "proxy_port": {
+      "description": "プロキシ待受ポート"
+    },
+    "proxy_host": {
+      "description": "プロキシ待受アドレス",
+      "hint": "127.0.0.1（ローカルのみ）を推奨。外部からアクセスする場合は 0.0.0.0 に変更"
+    },
+    "proxy_api_key": {
+      "description": "プロキシ自身の API Key",
+      "hint": "任意。設定するとクライアントは Authorization ヘッダーにこの Key を付与する必要があります"
+    },
+    "empty_response_max_attempts": {
+      "description": "空応答の再試行回数",
+      "hint": "Provider が空応答を返した場合、次の Provider に移る前にこの回数だけ再試行します。空応答検出は現在非ストリーミングのみ対応"
+    },
+    "cooldown_policy": {
+      "description": "連続失敗クールダウン段階",
+      "hint": "各項目は [連続失敗回数, クールダウン分数] で、失敗回数の昇順に並べます。既定値は 1 回=1 分、2〜4 回=5 分、5 回以上=30 分です。最初のしきい値未満の場合は最初の段階を適用します。JSON 文字列も指定可能です"
+    },
+    "call_log_max_per_provider": {
+      "description": "Provider ごとのログ保持件数",
+      "hint": "呼び出しログは Provider ごとに独立して最新 N 件を保持し、互いに影響しません。0 でログを保持しません"
+    },
+    "virtual_models": {
+      "description": "仮想モデル設定一覧",
+      "hint": "各仮想モデルは 1 つの Provider フォールバックチェーンに対応します",
+      "templates": {
+        "default": {
+          "name": "フォールバック仮想モデル",
+          "hint": "クライアントに公開するモデル名と Provider フォールバック一覧を設定します",
+          "display_name": {
+            "description": "仮想モデル名",
+            "hint": "クライアントがリクエスト時に使用します。旧設定の name フィールドも引き続き利用可能です"
+          },
+          "provider_ids": {
+            "description": "フォールバックチェーンの Provider",
+            "hint": "優先度順に並べます。Provider を 1 つ以上選択してください"
+          }
+        }
+      }
+    },
+    "page_background": {
+      "description": "監視ページの背景画像",
+      "hint": "プロキシモニタリングページの背景画像を設定します。空欄の場合は背景を表示しません。画像は 1 枚のみ指定可能。数 MB 以内に抑えてください。大きすぎると読み込みが遅くなります"
+    },
+    "page_background_opacity": {
+      "description": "背景画像の不透明度",
+      "hint": "背景画像の不透明度（0 で完全透明、1 で完全不透明）。背景画像を設定した場合のみ有効"
+    },
+    "page_background_blur": {
+      "description": "背景画像のぼかし",
+      "hint": "背景画像のぼかし半径（ピクセル）。背景画像を設定した場合のみ有効"
+    }
+  },
+  "views": {
+    "monitor": {
+      "title": "フォールバック監視",
+      "description": "各 Provider のクールダウン状態、連続失敗回数、仮想モデル設定を確認できます。",
+      "docTitle": "汎用フォールバックプロキシの状態",
+      "headerTitle": "フォールバックプロキシ監視",
+      "refresh": "更新",
+      "ok": "OK",
+      "close": "閉じる",
+      "logTitle": "呼び出しログ",
+      "logTitleFmt": "呼び出しログ：{provider}",
+      "rulesTitle": "カスタムルール",
+      "rulesTitleFmt": "カスタムルール：{provider}",
+      "editRuleTitleFmt": "ルール編集：{provider}",
+      "rulesDirty": "未保存",
+      "rulesHint": "失敗原因に一致文字列を含む（大小文字を区別しない）と 1 回の命中として数え、連続命中がしきい値に達すると対応する動作を実行します。成功するとカウンターはゼロに戻ります。変更は「保存」を押すと反映されます。「翌日 0 時までクールダウン」はタイムゾーンを個別指定できます（空欄はローカル）。海外 Provider の上限は他タイムゾーンでリセットされることが多いです。",
+      "rulePatternPlaceholder": "一致文字（例: 429）",
+      "ruleThresholdPlaceholder": "回数",
+      "actionCooldown": "クールダウン",
+      "actionUntilMidnight": "翌日 0 時までクールダウン",
+      "actionDisable": "無効化",
+      "actionCooldownFmt": "クールダウン {minutes}",
+      "actionUntilMidnightTz": "翌日 0 時までクールダウン（{tz}）",
+      "ruleMinutesPlaceholder": "分",
+      "ruleTzPlaceholder": "タイムゾーン",
+      "ruleTzTitle": "「翌日 0 時までクールダウン」のみ：空欄または local=ローカル、UTC=協定世界時、オフセット時間は -8/+9/+5.5 など",
+      "ruleTzHint": "タイムゾーン形式：空欄/local=ローカル、UTC/GMT=協定世界時、オフセット時間は -8、+9、+5.5、UTC+08:30 など",
+      "ruleAdd": "追加",
+      "ruleClear": "クリア",
+      "ruleUpdate": "更新",
+      "ruleDiscard": "破棄",
+      "rulesSave": "保存",
+      "discardWarning": "保存していないルール変更を破棄しました",
+      "rulesEmpty": "ルールはまだありません。下から追加できます。",
+      "ruleCondition": "連続 {n} 回 → {action}",
+      "ruleHitsTitle": "連続命中回数 / 発動しきい値",
+      "edit": "編集",
+      "deleteRule": "削除",
+      "tzInvalidFormat": "タイムゾーン形式が無効です（local / UTC / GMT / UTC±N、または -8、+9、+5.5 などのオフセット時間、範囲 -24〜24）",
+      "tzOutOfRange": "タイムゾーンのオフセットが範囲外です（-24〜24 の間で指定）",
+      "errPatternEmpty": "一致文字を入力してください",
+      "errPatternTooLong": "一致文字は 100 文字以内で入力してください",
+      "errThreshold": "連続回数は 1 以上の整数で入力してください",
+      "errCooldownMinutes": "クールダウン分数は 0 より大きい数値で入力してください",
+      "errSaveFailed": "保存に失敗: ",
+      "unknownError": "不明なエラー",
+      "errFetchLogs": "呼び出しログの取得に失敗: ",
+      "errOperationFailed": "操作に失敗: ",
+      "loadFailed": "読み込みに失敗しました。再試行してください。",
+      "lastUpdate": "最終更新: ",
+      "minutesUnit": "分",
+      "policyPrefix": "クールダウン段階: ",
+      "policyEntry": "{n} 回→{minutes}",
+      "policySep": "、",
+      "loading": "読み込み中…",
+      "noVirtualModels": "仮想モデルが設定されていません",
+      "providerCount": "Provider {n} 件",
+      "noProvider": "この仮想モデルには Provider が設定されていません",
+      "statusAvailable": "利用可能",
+      "statusDisabled": "無効",
+      "statusCooldown": "クールダウン中",
+      "metaCooldown": "残り {n} 秒",
+      "metaFail": "連続失敗 {n} 回",
+      "metaRule": "カスタムルール {n} 件",
+      "enable": "有効化",
+      "disable": "無効化",
+      "log": "ログ",
+      "rule": "ルール",
+      "noLogs": "呼び出し記録がありません",
+      "logSuccess": "成功",
+      "logFail": "失敗",
+      "emptyResponse": "連続 {n} 回空応答",
+      "streamEmptyResponse": "連続 {n} 回ストリーム空応答"
+    }
+  }
+}

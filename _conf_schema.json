@@ -23,16 +23,16 @@
     "hint": "若 Provider 返回空响应，则对这个 Provider 连续重试该次数，超过再尝试下一个 Provider。空响应检测暂时仅支持非流式"
   },
   "cooldown_policy": {
-    "description": "连续失败冷却阶梯（分钟）",
+    "description": "连续失败冷却阶梯",
     "type": "list",
     "default": [[1, 1], [2, 5], [5, 30]],
-    "hint": "每项为 [连续失败次数, 冷却分钟数]，按失败次数升序。默认表示连续失败 1 次冷却 1 分钟、2-4 次冷却 5 分钟、5 次及以上冷却 30 分钟。次数低于首档阈值时按首档处理；也可填 JSON 字符串。非法配置会在日志报错并回退为默认值"
+    "hint": "每项为 [连续失败次数, 冷却分钟数]，按失败次数升序。默认表示连续失败 1 次冷却 1 分钟、2-4 次冷却 5 分钟、5 次及以上冷却 30 分钟。次数低于首档阈值时按首档处理；也可填 JSON 字符串"
   },
   "call_log_max_per_provider": {
-    "description": "每个 Provider 调用日志保留条数",
+    "description": "单 Provider 日志保留条数",
     "type": "int",
     "default": 200,
-    "hint": "调用日志按每个 Provider 各自保留最近 N 条、互不影响：调用多的 Provider 不会挤掉调用少的 Provider 的日志，避免后者在面板显示为空。设为 0 表示不保留日志"
+    "hint": "调用日志按每个 Provider 各自保留最近 N 条、互不影响。设为 0 表示不保留日志"
   },
   "virtual_models": {
     "description": "虚拟模型配置列表",
@@ -42,13 +42,13 @@
       "default": {
         "name": "回退虚拟模型",
         "hint": "配置一个对外暴露的模型名称及其 Provider 回退列表",
-        "display_item": "name",
+        "display_item": "display_name",
         "items": {
-          "name": {
+          "display_name": {
             "description": "虚拟模型名称",
             "type": "string",
-            "default": "fallback-model",
-            "hint": "客户端请求时使用"
+            "default": "",
+            "hint": "客户端请求时使用；旧配置中的 name 字段仍兼容"
           },
           "provider_ids": {
             "description": "回退链 Providers",
@@ -63,7 +63,7 @@
     "default": [
       {
         "__template_key": "default",
-        "name": "my-fallback",
+        "display_name": "my-fallback",
         "provider_ids": []
       }
     ]

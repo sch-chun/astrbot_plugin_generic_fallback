@@ -172,10 +172,21 @@ class GenericFallbackProxyPlugin(Star):
             logger.error("❌ virtual_models 未配置！请在管理面板中至少配置一个虚拟模型。")
             return
 
+        # 一次性迁移：旧配置的字段名是 name，面板改版后统一为 display_name。
+        # 内存里先归一化，再在配置对象支持时持久化（测试用普通 dict 无 save_config）。
+        migrated = False
+        for v in virtual_models_raw:
+            if isinstance(v, dict) and "name" in v and not v.get("display_name"):
+                v["display_name"] = v["name"]
+                migrated = True
+        if migrated and callable(save_config := getattr(self.config, "save_config", None)):
+            save_config()
+
         # 解析并过滤有效配置（至少有一个 provider_ids）
         self._virtual_models = []
         for v in virtual_models_raw:
-            name = v.get("name", "")
+            # 兼容旧配置：面板改写 display_name 前，字段名曾是 name
+            name = v.get("display_name") or v.get("name", "")
             provider_ids = v.get("provider_ids", [])
             if not provider_ids:
                 logger.warning(f"虚拟模型 '{name}' 的 provider_ids 为空，跳过")

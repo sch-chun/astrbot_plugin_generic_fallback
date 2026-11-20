@@ -482,8 +482,9 @@ h1 {
 }
 
 /* 自定义规则模态框 */
+/* 规则表单有 5~6 个控件，英文选项/占位较长；加宽到能容纳最长组合，避免 Clear 被挤到下一行 */
 .rules-panel {
-  max-width: 560px;
+  max-width: 680px;
 }
 
 /* 「未保存」标记：草稿与服务端快照不一致时显示 */
@@ -602,12 +603,23 @@ h1 {
   color: #888;
 }
 
-#rule-pattern { flex: 1 1 140px; min-width: 0; }
-#rule-threshold { width: 64px; }
-/* JS 会按当前选项文字实测覆盖此宽度；128 为无 JS 时容纳最长选项的安全宽度 */
+/* 匹配内容可伸缩：基准压到 100px，把宽度让给定宽的占位/下拉/按钮，避免最长语文换行 */
+#rule-pattern { flex: 1 1 100px; min-width: 0; }
+/* 宽度由 JS 按当前语言 placeholder 实测覆盖；下列为无 JS 时的安全兜底 */
+#rule-threshold { width: 80px; }
+#rule-minutes { width: 90px; }
+#rule-tz { width: 105px; }
+/* 动作下拉框宽度由 JS 按当前选项文字实测覆盖；128 为无 JS 时容纳最长选项的安全宽度 */
 #rule-action { width: 128px; }
-#rule-minutes { width: 68px; }
-#rule-tz { width: 72px; }
+
+/* 两个操作按钮成组：始终相邻并靠右，不会被单独挤到下一行 */
+.rule-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
 
 .rules-footer {
   margin-top: 12px;

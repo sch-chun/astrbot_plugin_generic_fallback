@@ -435,13 +435,26 @@ class ModelManager:
                 "cooldown_policy": self.cooldown_policy,
             }
 
-    async def record_call(self, provider_id: str, success: bool, reason: str = "") -> None:
+    async def record_call(
+        self,
+        provider_id: str,
+        success: bool,
+        reason: str = "",
+        reason_key: str = "",
+        reason_params: dict | None = None,
+    ) -> None:
         """记录一次 Provider 调用的结果，供监控面板查看
+
+        reason 是原文，保留给规则匹配日志与旧面板兜底；reason_key 是稳定键，
+        reason_params 是模板参数，两者供前端按当前语言渲染文案。上游异常
+        没有稳定键时 reason_key 留空，面板直接显示 reason 原文。
 
         Args:
             provider_id: Provider ID。
             success: 调用是否成功。
-            reason: 失败原因；成功时留空。
+            reason: 失败原因原文；成功时留空。
+            reason_key: 失败原因的稳定键（如 empty_response），无则留空。
+            reason_params: 渲染 i18n 文案时替换占位符的参数。
         """
         with self._lock:
             buf = self._call_log.get(provider_id)
@@ -453,6 +466,8 @@ class ModelManager:
                 "provider_id": provider_id,
                 "success": success,
                 "reason": reason,
+                "reason_key": reason_key,
+                "reason_params": dict(reason_params or {}),
             })
 
     async def get_call_log(self, provider_id: str) -> list[dict]:

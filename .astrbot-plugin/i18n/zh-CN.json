@@ -1,0 +1,137 @@
+{
+  "metadata": {
+    "display_name": "Generic Fallback",
+    "short_desc": "通用回退插件，可把多个 Provider 回退链整合成虚拟模型，供本体及其他插件调用",
+    "desc": "通用回退插件，可配置多个 Provider 回退列表整合成的虚拟模型，供本体及其他插件调用；提供 OpenAI 兼容代理端点、冷却阶梯、手动禁用、调用日志与自定义规则监控面板。"
+  },
+  "config": {
+    "proxy_port": {
+      "description": "代理监听端口"
+    },
+    "proxy_host": {
+      "description": "代理监听地址",
+      "hint": "建议保持 127.0.0.1（仅本机），若需外部访问改为 0.0.0.0"
+    },
+    "proxy_api_key": {
+      "description": "代理自身 API Key",
+      "hint": "可选，设置后客户端需在 Authorization 头携带此 Key"
+    },
+    "empty_response_max_attempts": {
+      "description": "空响应重试次数",
+      "hint": "若 Provider 返回空响应，则对这个 Provider 连续重试该次数，超过再尝试下一个 Provider。空响应检测暂时仅支持非流式"
+    },
+    "cooldown_policy": {
+      "description": "连续失败冷却阶梯",
+      "hint": "每项为 [连续失败次数, 冷却分钟数]，按失败次数升序。默认表示连续失败 1 次冷却 1 分钟、2-4 次冷却 5 分钟、5 次及以上冷却 30 分钟。次数低于首档阈值时按首档处理；也可填 JSON 字符串"
+    },
+    "call_log_max_per_provider": {
+      "description": "单 Provider 日志保留条数",
+      "hint": "调用日志按每个 Provider 各自保留最近 N 条、互不影响。设为 0 表示不保留日志"
+    },
+    "virtual_models": {
+      "description": "虚拟模型配置列表",
+      "hint": "每个虚拟模型对应一组 Provider 回退链",
+      "templates": {
+        "default": {
+          "name": "回退虚拟模型",
+          "hint": "配置一个对外暴露的模型名称及其 Provider 回退列表",
+          "display_name": {
+            "description": "虚拟模型名称",
+            "hint": "客户端请求时使用；旧配置中的 name 字段仍兼容"
+          },
+          "provider_ids": {
+            "description": "回退链 Providers",
+            "hint": "按优先级顺序，至少选择一个 Provider"
+          }
+        }
+      }
+    },
+    "page_background": {
+      "description": "监控页背景图",
+      "hint": "为回退代理监控页设置背景图；留空则不显示背景。仅支持单张图片。建议图片不要过大（如控制在数 MB 内），过大将拖慢页面加载"
+    },
+    "page_background_opacity": {
+      "description": "背景图不透明度",
+      "hint": "背景图的不透明度（0 完全透明，1 完全不透明）；仅在配置了背景图时生效"
+    },
+    "page_background_blur": {
+      "description": "背景图模糊度",
+      "hint": "背景图的模糊半径（像素）；仅在配置了背景图时生效"
+    }
+  },
+  "views": {
+    "monitor": {
+      "title": "回退代理监控",
+      "description": "查看各 Provider 的冷却状态、连续失败次数与虚拟模型配置。",
+      "docTitle": "通用回退代理状态",
+      "headerTitle": "回退代理监控",
+      "refresh": "刷新",
+      "ok": "确定",
+      "close": "关闭",
+      "logTitle": "调用日志",
+      "logTitleFmt": "调用日志：{provider}",
+      "rulesTitle": "自定义规则",
+      "rulesTitleFmt": "自定义规则：{provider}",
+      "editRuleTitleFmt": "编辑规则：{provider}",
+      "rulesDirty": "未保存",
+      "rulesHint": "失败原因包含匹配内容（不区分大小写）即记一次命中，连续命中达到阈值时触发对应动作；一次成功会清零计数。修改后需点「保存」生效。「冷却到次日 0 点」可单独指定时区（留空按本机），国外供应商额度常在其它时区清零。",
+      "rulePatternPlaceholder": "匹配内容，如 429",
+      "ruleThresholdPlaceholder": "次数",
+      "actionCooldown": "冷却",
+      "actionUntilMidnight": "冷却到次日 0 点",
+      "actionDisable": "禁用",
+      "actionCooldownFmt": "冷却 {minutes}",
+      "actionUntilMidnightTz": "冷却到次日 0 点（{tz}）",
+      "ruleMinutesPlaceholder": "分钟",
+      "ruleTzPlaceholder": "时区",
+      "ruleTzTitle": "仅「冷却到次日 0 点」动作：留空或 local=本机时区，UTC=世界标准时，偏移小时数如 -8/+9/+5.5",
+      "ruleTzHint": "时区格式：留空/local=本机时区，UTC/GMT=世界标准时，偏移小时数如 -8、+9、+5.5、UTC+08:30",
+      "ruleAdd": "添加",
+      "ruleClear": "清空",
+      "ruleUpdate": "更新",
+      "ruleDiscard": "放弃",
+      "rulesSave": "保存",
+      "discardWarning": "已丢弃未保存的规则修改",
+      "rulesEmpty": "暂无规则，可在下方添加",
+      "ruleCondition": "连续 {n} 次 → {action}",
+      "ruleHitsTitle": "已连续命中次数 / 触发阈值",
+      "edit": "编辑",
+      "deleteRule": "删除",
+      "tzInvalidFormat": "时区格式无效（应为 local / UTC / GMT / UTC±N，或偏移小时数如 -8、+9、+5.5，范围 -24~24）",
+      "tzOutOfRange": "时区偏移超出范围（应在 -24 ~ 24 之间）",
+      "errPatternEmpty": "匹配内容不能为空",
+      "errPatternTooLong": "匹配内容不能超过 100 个字符",
+      "errThreshold": "连续次数必须是大于 0 的整数",
+      "errCooldownMinutes": "冷却分钟数必须是大于 0 的数字",
+      "errSaveFailed": "保存失败: ",
+      "unknownError": "未知错误",
+      "errFetchLogs": "获取调用日志失败: ",
+      "errOperationFailed": "操作失败: ",
+      "loadFailed": "加载失败，请重试",
+      "lastUpdate": "最后更新: ",
+      "minutesUnit": " 分钟",
+      "policyPrefix": "冷却阶梯: ",
+      "policyEntry": "{n} 次→{minutes}",
+      "policySep": "，",
+      "loading": "加载中…",
+      "noVirtualModels": "暂无虚拟模型配置",
+      "providerCount": "{n} 个 Provider",
+      "noProvider": "该虚拟模型未配置 Provider",
+      "statusAvailable": "可用",
+      "statusDisabled": "已禁用",
+      "statusCooldown": "冷却中",
+      "metaCooldown": "剩余 {n} 秒",
+      "metaFail": "连续失败 {n} 次",
+      "metaRule": "{n} 条自定义规则",
+      "enable": "解禁",
+      "disable": "禁用",
+      "log": "日志",
+      "rule": "规则",
+      "noLogs": "暂无调用记录",
+      "logSuccess": "成功",
+      "logFail": "失败",
+      "emptyResponse": "连续 {n} 次返回空响应",
+      "streamEmptyResponse": "连续 {n} 次流式返回空响应"
+    }
+  }
+}

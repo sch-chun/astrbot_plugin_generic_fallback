@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>通用回退代理状态</title>
+    <title data-i18n="docTitle">通用回退代理状态</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -11,12 +11,12 @@
     <div id="app">
       <header>
         <div>
-          <h1>回退代理监控</h1>
+          <h1 data-i18n="headerTitle">回退代理监控</h1>
           <div id="policy-hint"></div>
         </div>
         <div id="toolbar">
           <span id="last-update"></span>
-          <button id="refresh-btn" class="btn-primary">刷新</button>
+          <button id="refresh-btn" class="btn-primary" data-i18n="refresh">刷新</button>
         </div>
       </header>
 
@@ -29,7 +29,7 @@
     <div id="modal" class="modal" hidden>
       <div class="modal-panel">
         <p id="modal-message"></p>
-        <button id="modal-ok" class="btn-primary">确定</button>
+        <button id="modal-ok" class="btn-primary" data-i18n="ok">确定</button>
       </div>
     </div>
 
@@ -37,8 +37,8 @@
     <div id="log-modal" class="modal" hidden>
       <div class="modal-panel log-panel">
         <div class="log-header">
-          <span id="log-title">调用日志</span>
-          <button id="log-close" class="btn-outline">关闭</button>
+          <span id="log-title" data-i18n="logTitle">调用日志</span>
+          <button id="log-close" class="btn-outline" data-i18n="close">关闭</button>
         </div>
         <div id="log-list" class="log-list"></div>
       </div>
@@ -48,32 +48,34 @@
     <div id="rules-modal" class="modal" hidden>
       <div class="modal-panel rules-panel">
         <div class="log-header">
-          <span id="rules-title">自定义规则</span>
-          <span id="rules-dirty" class="rules-dirty" hidden>未保存</span>
-          <button id="rules-close" class="btn-outline">关闭</button>
+          <span id="rules-title" data-i18n="rulesTitle">自定义规则</span>
+          <span id="rules-dirty" class="rules-dirty" hidden data-i18n="rulesDirty">未保存</span>
+          <button id="rules-close" class="btn-outline" data-i18n="close">关闭</button>
         </div>
-        <p class="rules-hint">
+        <p class="rules-hint" data-i18n="rulesHint">
           失败原因包含匹配内容（不区分大小写）即记一次命中，连续命中达到阈值时触发对应动作；
           一次成功会清零计数。修改后需点「保存」生效。
           「冷却到次日 0 点」可单独指定时区（留空按本机），国外供应商额度常在其它时区清零。
         </p>
         <div id="rules-list" class="rules-list"></div>
         <form id="rule-form" class="rule-form">
-          <input id="rule-pattern" type="text" placeholder="匹配内容，如 429" maxlength="100" />
-          <input id="rule-threshold" type="number" min="1" step="1" placeholder="次数" />
+          <input id="rule-pattern" type="text" data-i18n-ph="rulePatternPlaceholder" placeholder="匹配内容，如 429" maxlength="100" />
+          <input id="rule-threshold" type="number" min="1" step="1" data-i18n-ph="ruleThresholdPlaceholder" placeholder="次数" />
           <select id="rule-action">
-            <option value="cooldown">冷却</option>
-            <option value="until_midnight">冷却到次日 0 点</option>
-            <option value="disable">禁用</option>
+            <option value="cooldown" data-i18n="actionCooldown">冷却</option>
+            <option value="until_midnight" data-i18n="actionUntilMidnight">冷却到次日 0 点</option>
+            <option value="disable" data-i18n="actionDisable">禁用</option>
           </select>
-          <input id="rule-minutes" type="number" min="0.1" step="0.1" placeholder="分钟" />
-          <input id="rule-tz" type="text" placeholder="时区" title="仅「冷却到次日 0 点」动作：留空或 local=本机时区，UTC=世界标准时，偏移小时数如 -8/+9/+5.5" hidden />
-          <button id="rule-add-btn" type="submit" class="btn-outline">添加</button>
-          <button id="rule-cancel-btn" type="button" class="btn-outline">清空</button>
+          <input id="rule-minutes" type="number" min="0.1" step="0.1" data-i18n-ph="ruleMinutesPlaceholder" placeholder="分钟" />
+          <input id="rule-tz" type="text" data-i18n-ph="ruleTzPlaceholder" data-i18n-title="ruleTzTitle" placeholder="时区" title="仅「冷却到次日 0 点」动作：留空或 local=本机时区，UTC=世界标准时，偏移小时数如 -8/+9/+5.5" hidden />
+          <div class="rule-form-actions">
+            <button id="rule-add-btn" type="submit" class="btn-outline" data-i18n="ruleAdd">添加</button>
+            <button id="rule-cancel-btn" type="button" class="btn-outline" data-i18n="ruleClear">清空</button>
+          </div>
         </form>
-        <p id="rule-tz-hint" class="rule-tz-hint" hidden>时区格式：留空/local=本机时区，UTC/GMT=世界标准时，偏移小时数如 -8、+9、+5.5、UTC+08:30</p>
+        <p id="rule-tz-hint" class="rule-tz-hint" hidden data-i18n="ruleTzHint">时区格式：留空/local=本机时区，UTC/GMT=世界标准时，偏移小时数如 -8、+9、+5.5、UTC+08:30</p>
         <div class="rules-footer">
-          <button id="rules-save-btn" type="button" class="btn-primary">保存</button>
+          <button id="rules-save-btn" type="button" class="btn-primary" data-i18n="rulesSave">保存</button>
         </div>
       </div>
     </div>

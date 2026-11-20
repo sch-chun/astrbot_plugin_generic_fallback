@@ -347,7 +347,9 @@ def create_proxy_router(
                         provider_id, f"连续 {empty_response_max_attempts} 次返回空响应"
                     )
                     await model_manager.record_call(
-                        provider_id, False, f"连续 {empty_response_max_attempts} 次返回空响应"
+                        provider_id, False, f"连续 {empty_response_max_attempts} 次返回空响应",
+                        reason_key="empty_response",
+                        reason_params={"n": empty_response_max_attempts},
                     )
                     return None
             else:
@@ -518,7 +520,9 @@ def create_proxy_router(
                             pid, f"连续 {empty_response_max_attempts} 次流式返回空响应"
                         )
                         await model_manager.record_call(
-                            pid, False, f"连续 {empty_response_max_attempts} 次流式返回空响应"
+                            pid, False, f"连续 {empty_response_max_attempts} 次流式返回空响应",
+                            reason_key="stream_empty_response",
+                            reason_params={"n": empty_response_max_attempts},
                         )
                         break
                     except Exception as e:

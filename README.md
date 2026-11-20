@@ -1,3 +1,5 @@
+[English](docs/en/README.md) · [Русский](docs/ru/README.md) · [日本語](docs/ja/README.md) · 简体中文
+
 # Generic Fallback Proxy
 
 [![CI](https://github.com/sch-chun/astrbot_plugin_generic_fallback/actions/workflows/ci.yml/badge.svg)](https://github.com/sch-chun/astrbot_plugin_generic_fallback/actions/workflows/ci.yml)
@@ -16,6 +18,7 @@
 - **API Key 验证**：可选启用代理层自身的 API Key 认证
 - **模型标签**：可选在响应文本前插入 `[Provider名称]` 标识，方便追踪实际使用的模型
 - **监控面板**：内置 Web 状态页面，查看冷却状态和虚拟模型配置
+- **多语言**：配置项与监控面板支持简体中文 / English / 日本語 / Русский，随 AstrBot 面板语言自动切换；README 同样提供四语版本
 
 ## 安装
 
@@ -36,15 +39,15 @@ git clone https://github.com/sch-chun/astrbot_plugin_generic_fallback.git
 | `proxy_port` | int | `3474` | 代理服务监听端口 |
 | `proxy_api_key` | string | (空) | 代理层 API Key，留空则不验证 |
 | `empty_response_max_attempts` | int | `3` | 空响应重试次数，超过后回退到下一个 Provider 但不计入连续失败（流式下重试与回退均在首个内容字节发出前完成；全部 Provider 均不可用时返回 503，与非流式一致） |
-| `cooldown_policy` | list | `[[1, 1], [2, 5], [5, 30]]` | 连续失败冷却阶梯（分钟），详见下 |
-| `call_log_max_per_provider` | int | `200` | 每个 Provider 调用日志保留条数；各 Provider 独立保留最近 N 条、互不挤占，低流量 Provider 不会被高流量 Provider 挤出。设为 0 表示不保留日志 |
+| `cooldown_policy` | list | `[[1, 1], [2, 5], [5, 30]]` | 连续失败冷却阶梯，详见下 |
+| `call_log_max_per_provider` | int | `200` | 单 Provider 日志保留条数；各 Provider 独立保留最近 N 条。设为 0 表示不保留日志 |
 | `virtual_models` | list | (见下) | 虚拟模型配置列表 |
 
 ### virtual_models 配置
 
 每个虚拟模型包含：
 
-- **name**：虚拟模型名称，客户端请求时使用（如 `my-fallback`）
+- **display_name**：虚拟模型名称，客户端请求时使用（如 `my-fallback`）；旧配置中的 `name` 字段仍兼容
 - **provider_ids**：选择作为回退链的 Provider，按优先级从高到低排列
 - **timeout**：请求超时时间（秒），默认 120
 
